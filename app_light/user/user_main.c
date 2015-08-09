@@ -68,11 +68,11 @@ os_timer_t disp_t;
 void ICACHE_FLASH_ATTR
 	disp_heap(int idx)
 {
-
 	os_printf("heap[%d]: %d \r\n",idx,system_get_free_heap_size());
 	UART_WaitTxFifoEmpty(0,50000);
 }
 
+os_timer_t reset_flg_t;
 
 void user_rf_pre_init(void)
 {
@@ -94,49 +94,105 @@ void ICACHE_FLASH_ATTR
     /*We have added esp-now feature in the light project */
     /*So that the lights in a certain MAC group can be easily controlled by an ESP-NOW controller*/
     /*The sample code is in APP_CONTROLLER/APP_SWITCH*/
+	light_EspnowMasterMacInit();
     light_EspnowInit();
 #endif
 
 #if 1
 
 #if ESP_PLATFORM
-		/*Initialization of the peripheral drivers*/
-		/*For light demo , it is user_light_init();*/
-		/* Also check whether assigned ip addr by the router.If so, connect to ESP-server  */
-		user_esp_platform_init_peripheral();
-disp_heap(5);
+	/*Initialization of the peripheral drivers*/
+	/*For light demo , it is user_light_init();*/
+	/* Also check whether assigned ip addr by the router.If so, connect to ESP-server  */
+    user_esp_platform_init_peripheral();
+    disp_heap(5);
 
 #endif
-		/*Establish a udp socket to receive local device detect info.*/
-		/*Listen to the port 1025, as well as udp broadcast.
-		/*If receive a string of device_find_request, it reply its IP address and MAC.*/
-		user_devicefind_init();
-disp_heap(6);
-		/*Establish a TCP server for http(with JSON) POST or GET command to communicate with the device.*/
-		/*You can find the command in "2B-SDK-Espressif IoT Demo.pdf" to see the details.*/
-		/*the JSON command for curl is like:*/
-		/*3 Channel mode: curl -X POST -H "Content-Type:application/json" -d "{\"period\":1000,\"rgb\":{\"red\":16000,\"green\":16000,\"blue\":16000}}" http://192.168.4.1/config?command=light 	 */
-		/*5 Channel mode: curl -X POST -H "Content-Type:application/json" -d "{\"period\":1000,\"rgb\":{\"red\":16000,\"green\":16000,\"blue\":16000,\"cwhite\":3000,\"wwhite\",3000}}" http://192.168.4.1/config?command=light 	 */
-		/***********NOTE!!**************/
-		/*in MESH mode, you need to add "sip","sport" and "router" fields to send command to the desired device*/
-		/*see details in MESH documentation*/
-		/*MESH INTERFACE IS AT PORT 8000, MESH WILL RELAY YOUR DATA TO PORT 80.*/
+	/*Establish a udp socket to receive local device detect info.*/
+	/*Listen to the port 1025, as well as udp broadcast.
+	/*If receive a string of device_find_request, it reply its IP address and MAC.*/
+	user_devicefind_init();
+    disp_heap(6);
+	/*Establish a TCP server for http(with JSON) POST or GET command to communicate with the device.*/
+	/*You can find the command in "2B-SDK-Espressif IoT Demo.pdf" to see the details.*/
+	/*the JSON command for curl is like:*/
+	/*3 Channel mode: curl -X POST -H "Content-Type:application/json" -d "{\"period\":1000,\"rgb\":{\"red\":16000,\"green\":16000,\"blue\":16000}}" http://192.168.4.1/config?command=light 	 */
+	/*5 Channel mode: curl -X POST -H "Content-Type:application/json" -d "{\"period\":1000,\"rgb\":{\"red\":16000,\"green\":16000,\"blue\":16000,\"cwhite\":3000,\"wwhite\",3000}}" http://192.168.4.1/config?command=light 	 */
+	/***********NOTE!!**************/
+	/*in MESH mode, you need to add "sip","sport" and "mdev_mac" fields to send command to the desired device*/
+	/*see details in MESH documentation*/
+	/*MESH INTERFACE IS AT PORT 8000*/
 #if ESP_WEB_SUPPORT
-//Initialize DNS server for captive portal
-captdnsInit();
-//Initialize espfs containing static webpages
-espFsInit((void*)(webpages_espfs_start));
-//Initialize webserver
-httpdInit(builtInUrls, SERVER_PORT);
+    //Initialize DNS server for captive portal
+    captdnsInit();
+    //Initialize espfs containing static webpages
+    espFsInit((void*)(webpages_espfs_start));
+    //Initialize webserver
+    httpdInit(builtInUrls, SERVER_PORT);
 
 #else
 #ifdef SERVER_SSL_ENABLE
-		user_webserver_init(SERVER_SSL_PORT);
+	user_webserver_init(SERVER_SSL_PORT);
 #else
-		user_webserver_init(SERVER_PORT);
+	user_webserver_init(SERVER_PORT);
 #endif
 #endif
 
+#endif
+
+
+//In debug mode, if you restart the light within 2 seconds, it will get into softap mode and wait for local upgrading firmware.
+//Restart again, it will clear the system param and set to default status.
+#if ESP_DEBUG_MODE
+    extern struct esp_platform_saved_param esp_param;
+	if(esp_param.reset_flg == MODE_APMODE){
+		os_printf("==================\r\n");
+		os_printf("RESET FLG==2,STATIONAP_MODE \r\n");
+		os_printf("==================\r\n");
+		
+	    struct softap_config config_softap;
+        char ssid[33]={0};
+        
+        wifi_softap_get_config(&config_softap);
+        os_memset(config_softap.password, 0, sizeof(config_softap.password));
+        os_memset(config_softap.ssid, 0, sizeof(config_softap.ssid));
+        os_sprintf(ssid,"ESP_%06X",system_get_chip_id());
+        os_memcpy(config_softap.ssid, ssid, os_strlen(ssid));
+        config_softap.ssid_len = os_strlen(ssid);
+        config_softap.authmode = AUTH_OPEN;
+        wifi_softap_set_config(&config_softap);
+        
+        os_printf("SET STATION-AP MODE\r\n");
+        //wifi_set_opmode(STATIONAP_MODE);
+		wifi_set_opmode(STATIONAP_MODE);
+		user_esp_platform_set_reset_flg(MODE_RESET);
+		os_timer_disarm(&reset_flg_t);
+		os_timer_setfn(&reset_flg_t,user_esp_platform_set_reset_flg,MODE_NORMAL);
+		os_timer_arm(&reset_flg_t,2000,0);
+		light_ShowDevLevel(4);
+		return;
+	}
+	
+	#if ESP_RESET_DEBUG_EN
+	else if(esp_param.reset_flg == MODE_RESET){
+		os_printf("==================\r\n");
+		os_printf("RESET FLG==1,RESET IN 200 MS \r\n");
+		os_printf("==================\r\n");
+		user_esp_platform_set_reset_flg(MODE_APMODE);
+		os_timer_disarm(&reset_flg_t);
+		os_timer_setfn(&reset_flg_t,user_esp_platform_reset_default,0);
+		os_timer_arm(&reset_flg_t,200,0);
+	}
+	else{
+	    os_printf("==================\r\n");
+		os_printf("RESET FLG==0,NORMAL MODE \r\n");
+		os_printf("==================\r\n");
+		user_esp_platform_set_reset_flg(MODE_APMODE);
+		os_timer_disarm(&reset_flg_t);
+		os_timer_setfn(&reset_flg_t,user_esp_platform_set_reset_flg,0);
+		os_timer_arm(&reset_flg_t,2000,0);
+	}
+    #endif
 #endif
 
 #if ESP_MESH_SUPPORT
@@ -144,12 +200,27 @@ httpdInit(builtInUrls, SERVER_PORT);
 	  1. search for existing mesh.
       2. if failed , try connecting recorded router.
 	*/
-	user_MeshSetInfo();
+    user_MeshSetInfo();
     user_MeshInit();
 #endif
 
 
 }
+
+void ICACHE_FLASH_ATTR
+	user_DispAppInfo()
+{
+	os_printf("SDK : %s \r\n",system_get_sdk_version());
+	os_printf("******************************\r\n");
+	os_printf("**  ESP_MESH_SUPPORT:  %d   **\r\n",ESP_MESH_SUPPORT);
+	os_printf("**  ESP_NOW_SUPPORT:   %d   **\r\n",ESP_NOW_SUPPORT);
+	os_printf("**  ESP_TOUCH_SUPPORT: %d   **\r\n",ESP_TOUCH_SUPPORT);
+	os_printf("**  ESP_WEB_SUPPORT:   %d   **\r\n",ESP_WEB_SUPPORT);
+	os_printf("**  ESP_PWM_VERSION:   %d   **\r\n",get_pwm_version());
+	os_printf("**  ESP_MDNS_SUPPORT:  %d   **\r\n",ESP_MDNS_SUPPORT);
+	os_printf("******************************\r\n\n\n");
+}
+
 
 /******************************************************************************
  * FunctionName : user_init
@@ -159,17 +230,19 @@ httpdInit(builtInUrls, SERVER_PORT);
 *******************************************************************************/
 void user_init(void)
 {
+	UART_WaitTxFifoEmpty(0,50000);
 	uart_init(74880,74880);
+	user_DispAppInfo();
+	//user_ReadMacListFromFlash();
+
 	wifi_set_opmode(STATIONAP_MODE);
 	wifi_station_set_auto_connect(0);
 	wifi_station_disconnect();
+	
     os_printf("SDK version:%s\n", system_get_sdk_version());
 	wifi_station_ap_number_set(AP_CACHE_NUMBER);
-	system_init_done_cb(light_main_flow);
 
-	
-    //light_EspnowInit();
-	//espSendQueueInit();
+	system_init_done_cb(light_main_flow);
 
 }
 

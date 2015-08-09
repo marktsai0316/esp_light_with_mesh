@@ -22,12 +22,11 @@ const char *device_find_request = "Are You Espressif IOT Smart Device?";
 #if PLUG_DEVICE
 const char *device_find_response_ok = "I'm Plug.";
 #elif LIGHT_DEVICE
-#if ESP_MESH_SUPPORT
-const char *device_find_response_ok = "I'm Light with mesh.";
-#else
-const char *device_find_response_ok = "I'm Light.";
-
-#endif
+    #if ESP_MESH_SUPPORT
+    const char *device_find_response_ok = "I'm Light with mesh.";
+    #else
+    const char *device_find_response_ok = "I'm Light.";
+    #endif
 #elif SENSOR_DEVICE
 #if HUMITURE_SUB_DEVICE
 const char *device_find_response_ok = "I'm Humiture.";

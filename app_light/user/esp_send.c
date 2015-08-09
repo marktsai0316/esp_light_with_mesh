@@ -40,11 +40,6 @@ sint8 ICACHE_FLASH_ATTR
 		
 		pdata = data;
 		RINGBUF_Push(r,pdata ,length);
-		
-		//SEND_DBG("data enq: \r\n len: %d \r\n++++++++++++++++\r\n",length);
-		//SEND_DBG("pconn ori: 0x%08x\r\n",pconn);
-		//SEND_DBG("%s \r\n",data);
-		//SEND_DBG("+++++++++++++++++++\r\n");
 		return 0;
 	}else{
 		return -1;
@@ -59,7 +54,6 @@ sint8 ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
 	espSendDataRetry(void* para)
 {
-	
 	if(espSendQueueIsEmpty(espSendGetRingbuf())){
 		return;
 	}else{
@@ -76,6 +70,10 @@ void ICACHE_FLASH_ATTR
 	espSendTask(os_event_t *e)
 {
 	SEND_DBG("************\r\n%s\r\n*************\r\n",__func__);
+	if(espSendQueueIsEmpty(espSendGetRingbuf())){
+		SEND_DBG("SENDING QUEUE EMPTY ALREADY,RETURN...\r\n");
+		return;
+	}
 	
 	RINGBUF* r = (RINGBUF*)(e->par);
 	
@@ -110,12 +108,31 @@ void ICACHE_FLASH_ATTR
 
     	sint8 res;
 
-		
+#if ESP_MESH_SUPPORT
+	#if ESP_MESH_STRIP
+		#if ESP_DEBUG_MODE
+		    struct espconn* pConTmp = (struct espconn*)user_GetUserPConn();
+		    if(pConTmp == sf.pConn){
+				res = espconn_mesh_sent(sf.pConn, dataSend, sf.dataLen);
+		    }else{
+				res = espconn_sent(sf.pConn, dataSend, sf.dataLen);
+		    }
+		#else
+            res = espconn_mesh_sent(sf.pConn, dataSend, sf.dataLen);
+		#endif
+	#else
+    res = espconn_sent(sf.pConn, dataSend, sf.dataLen);
+	#endif
+
+#else
 #ifdef CLIENT_SSL_ENABLE
 		res = espconn_secure_sent(sf.pConn, dataSend, sf.dataLen);
 #else
 		res = espconn_sent(sf.pConn, dataSend, sf.dataLen);
 #endif
+#endif
+
+
     	SEND_DBG("pconn: 0x%08x \r\n",sf.pConn);
 		SEND_DBG("pconn state: %d \r\n",sf.pConn->state);
 		SEND_DBG("pconn linkcnt: %d\r\n",sf.pConn->link_cnt);
@@ -128,10 +145,11 @@ void ICACHE_FLASH_ATTR
 			send_retry_cnt = 0;
     		espSendQueueUpdate(espSendGetRingbuf());//	
     		espSendAck(espSendGetRingbuf());
-    		//if(sf.dTgt == TO_LOCAL){
-    		//	espSendAck(espSendGetRingbuf());
-    		//}
+			if( !espSendQueueIsEmpty(espSendGetRingbuf())){
+				system_os_post(ESP_SEND_TASK_PRIO, 0, (os_param_t)espSendGetRingbuf());
+			}
     	}else{
+    		SEND_DBG("espconn send res: %d \r\n",res);
     		SEND_DBG("espconn send fail, send again...retry cnt: %d\r\n",send_retry_cnt);
 			SEND_DBG("espconn state: %d ; heap: %d ; ringbuf fill_cnt: %d\r\n",sf.pConn->state,system_get_free_heap_size(),espSendGetRingbuf()->fill_cnt);
 			if(send_retry_cnt>=SEND_RETRY_NUM || sf.pConn->state == ESPCONN_CLOSE || wifi_station_get_connect_status() != STATION_GOT_IP ){
@@ -204,6 +222,7 @@ sint8 ICACHE_FLASH_ATTR
 	SEND_DBG("get data type: %d \r\n",sf.dType);
 	SEND_DBG("esp send queue drop : %d bytes \r\n",sf.dataLen);
 	RINGBUF_Drop(r,sf.dataLen);
+	SEND_DBG("esp send buf remain: %d ; %d ; %d \r\n",r->fill_cnt,(r->size)-(r->fill_cnt),r->size);
 }
 
 /******************************************************************************

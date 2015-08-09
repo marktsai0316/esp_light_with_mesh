@@ -5,6 +5,7 @@
 typedef void (*WifiCallback)(uint8);
 
 void WIFI_Connect(uint8* ssid, uint8* pass, WifiCallback cb);
+void WIFI_StartCheckIp();
 
 
 

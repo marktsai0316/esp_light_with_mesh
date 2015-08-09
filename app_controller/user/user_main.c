@@ -78,7 +78,6 @@ uint32 user_GetBatteryVoltageMv() {
 	return mv;
 }
 
-
 void user_init(void)
 {
 #if LIGHT_DEVICE
@@ -99,6 +98,7 @@ void user_init(void)
 
 #endif
 }
+
 
 
 

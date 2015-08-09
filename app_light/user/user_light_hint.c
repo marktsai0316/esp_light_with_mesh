@@ -14,9 +14,7 @@ os_timer_t light_hint_t;
 #define LIGHT_INFO os_printf
 
 struct light_saved_param light_param_pre;
-
-
-
+//void light_MeshStoreCurParam(struct light_saved_param* plight_param);
 
 LOCAL void ICACHE_FLASH_ATTR
     light_blink(uint32 color)
@@ -75,10 +73,28 @@ void ICACHE_FLASH_ATTR
     os_timer_arm(&light_hint_t,1000,1);
 }
 
+//LOCAL uint8 shade_cnt = 0;
 LOCAL void ICACHE_FLASH_ATTR
 	light_shade(uint32 color)
 {
     static bool color_flg = true;
+	#if 0
+	static uint32 cnt=0;
+	if(shade_cnt != 0){	
+    	if(cnt >= (2*shade_cnt)){
+    		cnt = 0;
+			color_flg = true;
+    		os_timer_disarm(&light_hint_t);
+			light_set_aim(light_param_pre.pwm_duty[0],light_param_pre.pwm_duty[1],light_param_pre.pwm_duty[2],
+						  light_param_pre.pwm_duty[3],light_param_pre.pwm_duty[4],light_param_pre.pwm_period,0);
+			os_printf("RECOVER LIGHT PARAM: \r\n");
+    	}else if(cnt==0){
+			color_flg = true;
+    	}
+		cnt++;
+	}
+	#endif
+	
     if(color_flg){
         switch(color){
         case HINT_GREEN:
@@ -105,9 +121,13 @@ LOCAL void ICACHE_FLASH_ATTR
 
 
 void ICACHE_FLASH_ATTR
-	light_shadeStart(uint32 color,uint32 t)
+	light_shadeStart(uint32 color,uint32 t)	
+	//light_shadeStart(uint32 color,uint32 t,uint32 shadeCnt)
 {
     LIGHT_INFO("LIGHT SHADE START");
+	//shade_cnt = shadeCnt;
+	//light_MeshStoreCurParam(&light_param_pre);
+	
     os_timer_disarm(&light_hint_t);
     os_timer_setfn(&light_hint_t,light_shade,color);
     os_timer_arm(&light_hint_t,t,1);

@@ -21,17 +21,29 @@ enum mesh_status {
     MESH_ONLINE_AVAIL
 };
 
+enum mesh_node_type {
+    MESH_NODE_PARENT = 0,
+    MESH_NODE_CHILD
+}; 
+
+
 //#include "ip_addr.h"
 
 #define ESP_MESH_JSON_IP_ELEM_LEN       (16)
 #define ESP_MESH_JSON_PORT_ELEM_LEN     (14)
 #define ESP_MESH_JSON_ROUTER_ELEM_LEN   (19)
+#define ESP_MESH_JSON_DEV_MAC_ELEM_LEN   (25)
+#define ESP_MESH_JSON_DEV_PRNT_MAC_ELEM_LEN   (32)
+
+
 #define ESP_MESH_JSON_END_CHAR          '}'
 #define ESP_MESH_JSON_START_CHAR        '{'
 #define ESP_MESH_JSON_COMPENSATE_MAX    (6)
 
 #define ESP_MESH_SIP_STRING             "\"sip\""
 #define ESP_MESH_SPORT_STRING           "\"sport\""
+#define ESP_MESH_DEV_MAC_STRING           "\"mdev_mac\""
+
 #define ESP_MESH_ROUTER_STRING          "\"router\":\"FFFFFFFF\""
 #define ESP_MESH_MESH_STRING            "\"mesh\""
 
@@ -53,6 +65,11 @@ uint8 espconn_mesh_get_max_hops();
 sint8 espconn_mesh_get_status();
 //char * espconn_json_find_section(const char *pbuf, u16 len, const char *section);
 //uint32_t user_json_get_value(const char *pbuffer, uint16_t buf_len, const uint8_t *json_key);
+
+
+bool espconn_mesh_get_node_info(enum mesh_node_type type, uint8_t **info, uint8_t *count); 
+void espconn_mesh_set_dev_type(uint8 dev_type);
+void espconn_mesh_init_group_list(uint8* dev_mac,uint16 dev_count);
 
 #endif
 

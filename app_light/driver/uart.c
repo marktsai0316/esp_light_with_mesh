@@ -21,6 +21,11 @@
 #include "driver/uart_register.h"
 #include "mem.h"
 #include "os_type.h"
+#include "user_interface.h"
+#include "esp_send.h"
+#include "ip_addr.h"
+#include "espconn.h"
+
 
 // UartDev is defined and initialized in rom code.
 extern UartDevice    UartDev;
@@ -31,8 +36,8 @@ LOCAL struct UartBuffer* pRxBuffer = NULL;
 /*uart demo with a system task, to output what uart receives*/
 /*this is a example to process uart data from task,please change the priority to fit your application task if exists*/
 /*it might conflict with your task, if so,please arrange the priority of different task,  or combine it to a different event in the same task. */
-#define uart_recvTaskPrio        0
-#define uart_recvTaskQueueLen    10
+#define uart_recvTaskPrio        1
+#define uart_recvTaskQueueLen    2
 os_event_t    uart_recvTaskQueue[uart_recvTaskQueueLen];
 
 #define DBG  
@@ -279,9 +284,64 @@ uart_test_rx()
 }
 #endif
 
+LOCAL void ICACHE_FLASH_ATTR
+	wifi_con_cb_t(uint8 t)
+{
+	os_printf("-------------------\r\n");
+	os_printf("test in wifi con cb_t\r\n");
+	os_printf("-------------------\r\n");	
+}
+
+#if ESP_MESH_SUPPORT
+LOCAL void ICACHE_FLASH_ATTR
+	mesh_dis_cb_t()
+{
+	os_printf("-------------------\r\n");
+	os_printf("test in uart mesh disconn cb\r\n");
+	os_printf("-------------------\r\n");	
+}
+LOCAL void ICACHE_FLASH_ATTR
+	mesh_en_cb_t()
+{
+	os_printf("-------------------\r\n");
+	os_printf("test in uart mesh enable cb\r\n");
+	os_printf("-------------------\r\n");
+	wifi_set_opmode(STATIONAP_MODE);
+}
+
+
+
+#include "mesh.h"
+#endif
+#include "user_esp_platform.h"
+#include "espconn.h"
+
+void read_flash_test(uint32 addr,uint32 len)
+{
+	os_printf("\r\n====================\r\n");
+	os_printf("test read data: \r\n");
+	os_printf("addr: 0x%08x; len: %d \r\n",addr,len);
+	os_printf("--------------\r\n");
+	uint8* data = (uint8*)os_zalloc(len);
+    spi_flash_read(addr,(uint32*)data,len);
+    int j;
+    for(j=0;j<len;j++) os_printf("%02x ",data[j]);
+	os_printf("\r\n====================\r\n");
+}
+
 LOCAL void ICACHE_FLASH_ATTR ///////
 uart_recvTask(os_event_t *events)
 {
+	struct softap_config config;
+	struct station_config sta_config;
+	struct ip_info softap_ip;
+	struct ip_info sta_ip;
+	struct espconn pconn;
+	
+	static uint8 rnd;
+	uint8 *info_mesh;
+	uint8 cnt;
+
     if(events->sig == 0){
     #if  UART_BUFF_EN  
         Uart_rx_buff_enq();
@@ -289,9 +349,368 @@ uart_recvTask(os_event_t *events)
         uint8 fifo_len = (READ_PERI_REG(UART_STATUS(UART0))>>UART_RXFIFO_CNT_S)&UART_RXFIFO_CNT;
         uint8 d_tmp = 0;
         uint8 idx=0;
+		
+		int i;
+		extern struct esp_platform_saved_param esp_param;
         for(idx=0;idx<fifo_len;idx++) {
             d_tmp = READ_PERI_REG(UART_FIFO(UART0)) & 0xFF;
-            uart_tx_one_char(UART0, d_tmp);
+            //uart_tx_one_char(UART0, d_tmp);
+            //for mesh light debug//
+            switch(d_tmp){
+				case '1':
+					wifi_softap_get_config(&config);
+					wifi_station_get_config(&sta_config);
+					_LINE_DESP();
+					os_printf("ssid: %s \r\n",config.ssid);
+					os_printf("authmode:%d\r\n",config.authmode);
+					os_printf("password: %s\r\n",config.password);
+					os_printf("wifi mode : %d \r\n",wifi_get_opmode());
+					os_printf("auto connect: %d \r\n",wifi_station_get_auto_connect());
+					wifi_get_ip_info(SOFTAP_IF, &softap_ip);
+					wifi_get_ip_info(STATION_IF,&sta_ip);
+					os_printf("----------------\r\n");
+					os_printf("sta ssid : %s \r\n",sta_config.ssid);
+					os_printf("sta password : %s \r\n",sta_config.password);
+					os_printf("----------------\r\n");
+					uint32 staip=sta_ip.ip.addr;
+					uint32 sip = softap_ip.ip.addr;
+					os_printf("softap ip: %d.%d.%d.%d\r\n",(sip>>0)&0xff,
+						                                   (sip>>8)&0xff,
+						                                   (sip>>16)&0xff,
+						                                   (sip>>24)&0xff);
+					os_printf("station ip: %d.%d.%d.%d\r\n",(staip>>0)&0xff,
+						                                   (staip>>8)&0xff,
+						                                   (staip>>16)&0xff,
+						                                   (staip>>24)&0xff);
+					os_printf(" PLATFOR ACTIVE : %d \r\n",esp_param.activeflag);
+					os_printf("dev key: %s \r\n",esp_param.devkey);
+					os_printf("token: %s \r\n",esp_param.token);
+					os_printf("--------------------\r\n");
+#if ESP_MESH_SUPPORT
+					/*
+					espconn_mesh_get_node_info(MESH_NODE_PARENT,&info_mesh,&cnt);
+					os_printf("GET MESH PARENT:%d\r\n",cnt);
+					UART_WaitTxFifoEmpty(0,50000);
+					for(i=0;i<cnt;i++){
+						//os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+						os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(info_mesh+i*6));
+					}
+					*/
+
+					if (espconn_mesh_get_node_info(MESH_NODE_PARENT, &info_mesh, &cnt)) {
+						os_printf("get parent info success\n");
+						if (cnt == 0) {
+							os_printf("no parent\n");
+						} else {
+						   // children represents the count of children.
+						   // you can read the child-information from child_info.
+						   for(i=0;i<cnt;i++){
+						       //os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+						       os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(info_mesh+i*6));
+					       }
+						}
+					} else {
+						os_printf("get parent info fail\n");
+					} 
+
+
+					/*
+					espconn_mesh_get_node_info(MESH_NODE_CHILD,&info_mesh,&cnt);
+					os_printf("-------------------------\r\n");
+					os_printf("GET MESH CHILDREN:%d\r\n",cnt);
+					for(i=0;i<cnt;i++){
+						//os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+						os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(info_mesh+i*6));
+					}
+					*/
+
+					if (espconn_mesh_get_node_info(MESH_NODE_CHILD, &info_mesh, &cnt)) {
+						os_printf("get child info success\n");
+						if (cnt == 0) {
+							os_printf("no child\n");
+						} else {
+						   // children represents the count of children.
+						   // you can read the child-information from child_info.
+						   for(i=0;i<cnt;i++){
+						       //os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+						       os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(info_mesh+i*6));
+					       }
+						}
+					} else {
+						os_printf("get child info fail\n");
+					} 
+					
+#endif					
+					_LINE_DESP();
+					break;
+				case '2':
+					_LINE_DESP();
+					struct station_config config[5];
+					uint8 ap_record_num = wifi_station_get_ap_info(config); 
+					os_printf("AP CACHE CUR : %d \r\n",wifi_station_get_current_ap_id());
+					os_printf("AP CACHE NUM : %d \r\n",ap_record_num);
+					_LINE_DESP();
+					break;
+				case '3':
+					_LINE_DESP();
+					    extern bool ap_cache_if;
+					    os_printf("%s\n", __func__);
+						os_printf("HEAP: %d \r\n",system_get_free_heap_size());	
+						os_printf("ap_cache_if: %d \r\n",ap_cache_if);
+#if ESP_MESH_SUPPORT
+						sint8 mesh_status = espconn_mesh_get_status();
+						os_printf("---------------------------\r\n");
+						os_printf("mesh status: %d \r\n",mesh_status);
+#endif
+						os_printf("CHANNEL : %d \r\n",wifi_get_channel());
+						os_printf("---------------------------\r\n");
+						_LINE_DESP();
+						break;
+#if ESP_MESH_SUPPORT
+
+				case '4':
+					_LINE_DESP();
+					os_printf("MESH DISABLE \r\n");
+					espconn_mesh_disable(mesh_dis_cb_t);
+					_LINE_DESP();
+					break;
+				case '5':
+					_LINE_DESP();
+					os_printf("MESH LOCAL ENABLE START\r\n");
+					espconn_mesh_enable(mesh_en_cb_t,MESH_LOCAL);
+					_LINE_DESP();
+					break;
+				case '6':
+					_LINE_DESP();
+					os_printf("MESH ONLINE ENABLE START\r\n");
+					espconn_mesh_enable(mesh_en_cb_t,MESH_ONLINE);
+					_LINE_DESP();
+					break;
+#endif
+				case '7':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					//user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("IOT_DEMO_TEST","00000000",wifi_con_cb_t);
+					_LINE_DESP();
+					break;
+				case '8':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("IOT_DEMO_TEST","00000000",NULL);
+					_LINE_DESP();
+					break;
+				case '9':
+					_LINE_DESP();
+					os_printf("station auto connect : %d \r\n",wifi_station_get_auto_connect());
+					_LINE_DESP();
+					break;
+				case 'a':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("ESP_TEST","00000000",wifi_con_cb_t);
+					_LINE_DESP();
+					break;
+				case 'b':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("miwifi","123456789",wifi_con_cb_t);
+					_LINE_DESP();
+					break;
+				case 'c':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("miwifi","123456789",NULL);
+					_LINE_DESP();
+					break;
+				case 'd':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("TP-LINK_3E392E","11111111",wifi_con_cb_t);
+					_LINE_DESP();
+					break;
+				case 'e':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("TP-LINK_WJL","adam1215",NULL);
+					_LINE_DESP();
+					break;
+				case 'f':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("D-Link_Mesh","123456789",NULL);
+					_LINE_DESP();
+					break;
+				case 'g':
+					//wifi_station_disconnect();
+					_LINE_DESP();
+					os_printf("connect to wifi\r\n");
+					user_esp_platform_set_token("0123456789012345678901234567890123456789");
+					WIFI_Connect("MESH_AP","123456789",NULL);
+					_LINE_DESP();
+					break;
+				case 'h':
+					_LINE_DESP();
+					os_printf("OPEN SOFTAP\r\n");
+					struct softap_config conf;
+					wifi_softap_get_config(&conf);
+					conf.channel=5;
+					
+					wifi_set_opmode(STATIONAP_MODE);
+					wifi_softap_set_config(&conf);
+					wifi_set_channel(5);
+					break;
+				case 'i':
+					_LINE_DESP();
+					os_printf("STATION ONLY\r\n");
+					
+					wifi_set_opmode(STATION_MODE);
+					break;
+				case 'j':
+					
+					_LINE_DESP();
+					os_printf("SOFTAP ONLY\r\n");
+					wifi_set_opmode(SOFTAP_MODE);
+					break;
+				case 'k':
+					espconn_mdns_close();
+					struct ip_info ipconfig;
+					wifi_get_ip_info(STATION_IF, &ipconfig);
+					
+					struct mdns_info *info = (struct mdns_info *)os_zalloc(sizeof(struct mdns_info));
+					info->host_name = "espressif_light_demo";
+					info->ipAddr= ipconfig.ip.addr; //sation ip
+					info->server_name = "espLight";
+					info->server_port = 80;
+					info->txt_data[0] = "version = 1.0.1";
+					espconn_mdns_init(info);
+					break;
+				case 'l':
+					os_printf("action send\r\n");
+					#if ESP_NOW_SUPPORT
+					//light_EspnowInit();
+					uint8 tmac[]={0x18,0xFE,0x34,0xA5,0x3D,0x68};
+					uint8 sdata[10]={1,2,3,4,5,6,7,8,9,0};
+					esp_now_send(tmac, sdata, 10);
+					os_printf("target: "MACSTR"\r\n",MAC2STR(tmac));
+					os_printf("data: \r\n");
+					int j;
+					for(j=0;j<10;j++) os_printf("%02x ",sdata[j]);
+					os_printf("-------------------\r\n");
+					#endif
+					break;
+				case 'm':
+					os_printf("UPGRADE CHECK:\r\n");
+					
+					os_printf("=================\r\n");
+					os_printf("system_get_flash_size_map: %d  \r\n",system_get_flash_size_map());
+					os_printf("GET FLAG : %d\r\n",system_upgrade_flag_check());
+					os_printf("USER BIN CHECK: %d \r\n",system_upgrade_userbin_check());
+					os_printf("=================\r\n");
+					
+					break;
+				case 'n':
+					system_upgrade_flag_set(0x02);
+					os_printf("set upgrade FINISH: %d \r\n",system_upgrade_flag_check());
+					os_printf("=========================\r\n");
+					break;
+				case 'o':
+					system_upgrade_flag_set(0x0);
+					os_printf("set upgrade FINISH: %d \r\n",system_upgrade_flag_check());
+					os_printf("=========================\r\n");
+					break;
+				case 'p':
+					os_printf("upgrade reboot\r\n");
+					UART_WaitTxFifoEmpty(0,50000);
+					system_upgrade_reboot();
+					break;
+				case 'q':
+					read_flash_test(0x81000,32);
+					break;
+				case 'r':
+					os_printf("test send enq\r\n");
+					uint8* data = "test111222333";
+					//struct espconn pconn;
+					espSendEnq(data, os_strlen(data), &pconn, ESP_DATA,TO_LOCAL,espSendGetRingbuf());
+					os_printf("=================\r\n");
+					break;
+				case 's':
+					os_printf("test send deq\r\n");
+					uint8 data_pull[512];
+					os_memset(data_pull,0,512);
+					//struct espconn pconn;
+					//espSendEnq(data, os_strlen(data), &pconn, ESP_DATA ,espSendGetRingbuf());
+					//os_printf("=================\r\n");
+					
+					EspSendFrame sf;
+					uint8* pdata = (uint8*)&sf;
+					RINGBUF* r = espSendGetRingbuf();
+					os_printf("1test ringbuf : 0x%08x ; %d \r\n",r->p_r,r->fill_cnt);
+					RINGBUF_PullRaw(r,pdata,sizeof(EspSendFrame),0);
+					os_printf("2test ringbuf : 0x%08x ; %d \r\n",r->p_r,r->fill_cnt);
+					os_printf("get data length: %d \r\n",sf.dataLen);
+					os_printf("get pconn: 0x%08x \r\n",sf.pConn);
+					os_printf("get data type: %d \r\n",sf.dType);
+
+					
+					os_printf("3test ringbuf : 0x%08x ; %d \r\n",r->p_r,r->fill_cnt);
+					RINGBUF_PullRaw(r,data_pull,sf.dataLen,sizeof(EspSendFrame));
+					os_printf("4test ringbuf : 0x%08x ; %d \r\n",r->p_r,r->fill_cnt);
+
+					os_printf("---------------\r\n");
+					os_printf("data:%s\r\n",data_pull);
+					os_printf("---------------\r\n");
+					break;
+				case 't':
+					os_printf("send queue update:\r\n");
+					espSendQueueUpdate(espSendGetRingbuf());
+					os_printf("=================\r\n");
+					break;
+				case 'u':
+					#if ESP_MDNS_SUPPORT
+					os_printf("mdns init \r\n");
+					user_mdns_conf();
+					#endif
+					os_printf("==============\r\n");
+					
+					break;
+				case 'v':
+					os_printf("light_MeshShowLevel : %d \r\n",rnd);
+					light_ShowDevLevel((rnd++)%4);
+					break;
+					
+				case '0':
+					_LINE_DESP();
+					os_printf("reset...\r\n");
+					_LINE_DESP();
+					UART_WaitTxFifoEmpty(UART0,200000);
+					system_restore();
+					esp_param.activeflag = 0;
+					os_memset(esp_param.token,0,40);
+					system_param_save_with_protect(ESP_PARAM_START_SEC, &esp_param, sizeof(esp_param));
+					
+					//system_restart();
+					break;
+					
+				default:
+					break;
+
+            }
         }
         WRITE_PERI_REG(UART_INT_CLR(UART0), UART_RXFIFO_FULL_INT_CLR|UART_RXFIFO_TOUT_INT_CLR);
         uart_rx_intr_enable(UART0);

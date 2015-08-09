@@ -4,7 +4,7 @@
 #define SERVER_PORT 80
 #define SERVER_SSL_PORT 443
 
-#define URLSize 10
+#define URLSize 20
 
 #define WEB_INFO os_printf
 
@@ -27,6 +27,7 @@ typedef enum _ParmType {
     DEEP_SLEEP,
     LIGHT_STATUS,
     BATTERY_STATUS,
+    MESH_INFO,
     CONNECT_STATUS,
     USER_BIN
 } ParmType;

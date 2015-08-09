@@ -9,9 +9,9 @@ os_timer_t mesh_tout_t;
 os_timer_t mesh_user_t;
 
 uint8 mesh_last_status=MESH_DISABLE;
+LOCAL bool mesh_init_flag = true;
 
 LOCAL char* mdev_mac = NULL;
-
 
 void ICACHE_FLASH_ATTR
 	mesh_MacIdInit()
@@ -19,9 +19,7 @@ void ICACHE_FLASH_ATTR
 	if(mdev_mac){
 		os_printf("Mesh mdev_mac: %s \r\n",mdev_mac);
 	}
-
-	mdev_mac = (char*)os_zalloc(ESP_MESH_JSON_DEV_MAC_ELEM_LEN+1);
-	
+	mdev_mac = (char*)os_zalloc(ESP_MESH_JSON_DEV_MAC_ELEM_LEN+1);	
 	uint32 MAC_FLG = READ_PERI_REG(0x3ff00054);
 	MAC_FLG = ((MAC_FLG>>16)&0xff);
 	if(MAC_FLG == 0){
@@ -97,7 +95,7 @@ void ICACHE_FLASH_ATTR
     os_memset(config_softap.password,0,sizeof(config_softap.password));
     config_softap.authmode = AUTH_OPEN;
 #endif
-
+	wifi_set_opmode(STATIONAP_MODE);
     wifi_softap_set_config(&config_softap);
 	wifi_set_opmode(STATIONAP_MODE);
 	
@@ -143,21 +141,6 @@ void ICACHE_FLASH_ATTR
 	_LINE_DESP();
 }
 
-#if 0
-/******************************************************************************
- * FunctionName : meshSuccess
- * Description  : callback func when mesh init finished successfully
-                  In this demo , we run the platform code after mesh initialization
-*******************************************************************************/
-void ICACHE_FLASH_ATTR
-	meshStart(void* arg)
-{
-	MESH_INFO("mesh log: mesh start here\r\n");
-	user_esp_platform_connect_ap_cb();
-	return;
-}
-#endif
-
 /******************************************************************************
  * FunctionName : mesh_SuccessCb
  * Description  : callback func when mesh init finished successfully
@@ -171,15 +154,22 @@ void ICACHE_FLASH_ATTR
 	MESH_INFO("CONNECTED, DO RUN ESP PLATFORM...\r\n");
 	MESH_INFO("mesh status: %d\r\n",espconn_mesh_get_status());
 	_LINE_DESP();
-    struct ip_info sta_ip;
-    wifi_get_ip_info(STATION_IF,&sta_ip);
-	if( espconn_mesh_local_addr(&sta_ip.ip)){
-		MESH_INFO("THIS IS A MESH SUB NODE..\r\n");
-		uint32 mlevel = sta_ip.ip.addr&0xff;
-		light_ShowDevLevel(mlevel);
+
+	//show light status at the first time mesh enables
+	if(mesh_init_flag){
+        struct ip_info sta_ip;
+        wifi_get_ip_info(STATION_IF,&sta_ip);
+    	if( espconn_mesh_local_addr(&sta_ip.ip)){
+    		MESH_INFO("THIS IS A MESH SUB NODE..\r\n");
+    		uint32 mlevel = sta_ip.ip.addr&0xff;
+    		light_ShowDevLevel(mlevel);
+    	}else{
+    		MESH_INFO("THIS IS A MESH ROOT..\r\n");
+    	    light_ShowDevLevel(1);
+    	}
+		mesh_init_flag = false;
 	}else{
-		MESH_INFO("THIS IS A MESH ROOT..\r\n");
-	    light_ShowDevLevel(1);
+
 	}
 	
 #if ESP_NOW_SUPPORT
@@ -304,7 +294,8 @@ void ICACHE_FLASH_ATTR
 
 	if(mesh_status == MESH_ONLINE_AVAIL){
 		MESH_INFO("MESH ONLINE AVAIL\r\n");
-		user_esp_platform_sent_data();
+		//user_esp_platform_sent_data();
+		user_esp_platform_connect_ap_cb();
     }	//if(mesh_status == MESH_LOCAL_AVAIL){
     else{
 		espconn_mesh_enable(mesh_EnableCb, MESH_ONLINE);
@@ -334,11 +325,14 @@ void ICACHE_FLASH_ATTR
                   called in platform(dns found) to restart mesh if can not get any response from esp-server.
 *******************************************************************************/
 void ICACHE_FLASH_ATTR
-	mesh_StartReconnCheck(enum mesh_type type)
+	mesh_StartReconnCheck(uint32 t)
 {
+	//ESP_DBG("\r\n\n\n\n\n-=======================\r\n");
+	//os_printf("mesh_StartReconnCheck\r\n");
+	//ESP_DBG("-=======================\r\n\n\n\n\n\n");
     os_timer_disarm(&mesh_user_t);
 	os_timer_setfn(&mesh_user_t,mesh_ReconCheck,NULL);
-	os_timer_arm(&mesh_user_t,10000,0);
+	os_timer_arm(&mesh_user_t,t,0);
 }
 
 
@@ -390,6 +384,14 @@ void ICACHE_FLASH_ATTR
 	user_MeshSetInfo()
 {
 	//If the device is in MESH mode,the SSID would finally be MESH_SSID_PREFIX_X_XXXXXX
+	#if LIGHT_DEVICE
+	    espconn_mesh_set_dev_type(ESP_DEV_LIGHT);
+	#elif PLUG_DEVICE
+	    espconn_mesh_set_dev_type(ESP_DEV_PLUG);
+	#elif SENSOR_DEVICE
+	    espconn_mesh_set_dev_type(ESP_DEV_HUMITURE);
+	#endif
+
 	if( espconn_mesh_set_ssid_prefix(MESH_SSID_PREFIX,os_strlen(MESH_SSID_PREFIX))){
 		MESH_INFO("SSID PREFIX SET OK..\r\n");
 	}else{

@@ -49,6 +49,9 @@ uint8 ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
 	APCache_TimeoutCb()
 {
+	INFO("------------------\r\n");
+	INFO("APCache_TimeoutCb\r\n");
+	
 	os_timer_disarm(&ap_cache_t);
 	ap_cache_if = false;
 	_LINE_DESP();
@@ -70,13 +73,18 @@ void ICACHE_FLASH_ATTR
 	    INFO("AP CACHE TOUT,ALREADY DID ESP-TOUCH\r\n");
 		mesh_SetSoftap();
 		INFO("RE-SEARCH MESH NETWORK,in 60s \r\n");
+		//user_StopClientTimer();
 		//user_MeshInit();
 		
 		os_timer_disarm(&mesh_scan_t);
 		os_timer_setfn(&mesh_scan_t,user_MeshInit,NULL);
 		os_timer_arm(&mesh_scan_t,60000,0);
+		return;
 	//}
 #endif
+
+    WIFI_StartCheckIp();
+
 }
 
 uint8 ap_cache_record_num = 0;
@@ -93,6 +101,8 @@ bool ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
 	APCache_Connect()
 {
+	//INFO("------------------\r\n");
+	//INFO("APCache_Connect\r\n");
 	ap_cache_if=true;
 	struct station_config config[5];
 	uint8 ap_cnt = wifi_station_get_ap_info(config);	
@@ -104,10 +114,18 @@ void ICACHE_FLASH_ATTR
 	if(ap_cnt>0){
 		INFO("AP CACHE FIND, TRY CONNECTING WIFI \r\n");
 		ap_cur = wifi_station_get_current_ap_id();		
+		ap_cache_record_num = ap_cur;
 		
         while (1) {
 			ap_cur = ((ap_cur==AP_CACHE_NUMBER-1)?0:ap_cur+1);
-			
+
+			if(ap_cache_record_num == ap_cur){
+				INFO("AC CACHE CONNECT FAIL...\r\n");
+				break;
+			}
+			INFO("ap_cur: %d \r\n",ap_cur);
+			INFO("DEBUG:SSID: %s\r\n",config[ap_cur].ssid);
+			INFO("DEBUG:PASSWORD: %s \r\n",config[ap_cur].password);
     		if(wifi_station_ap_change(ap_cur) == true){
 				INFO("----------------\r\n");				
 				INFO("CURRENT AP NUM: %d \r\n",ap_cur);
@@ -122,6 +140,7 @@ void ICACHE_FLASH_ATTR
 				
 				INFO("CONNECT...\r\n");
 				INFO("----------------\r\n");
+				/*
 				if(ap_cache_record_flg == 0){
 					ap_cache_record_num = ap_cur;
 					ap_cache_record_flg = 1;
@@ -130,11 +149,16 @@ void ICACHE_FLASH_ATTR
 						APCache_TimeoutCb();
 					}
 				}
+				*/
 				
 				break;
     		}
-    		//ap_cur = ((ap_cur==AP_CACHE_NUMBER-1)?0:ap_cur+1);
-        }		
+
+
+        }	
+		if(ap_cache_record_num == ap_cur){
+			APCache_TimeoutCb();
+		}
 
 	}else{
 		_LINE_DESP();
@@ -155,6 +179,7 @@ void ICACHE_FLASH_ATTR
 	#if ESP_MESH_SUPPORT
 	    //else{
 			INFO("ALREADY DID ESP-TOUCH,RESTART MESH IN 60 S\r\n");
+	        mesh_StopReconnCheck();
 			mesh_SetSoftap();
 			os_timer_disarm(&mesh_scan_t);
 			os_timer_setfn(&mesh_scan_t,user_MeshInit,NULL);
@@ -185,7 +210,7 @@ void ICACHE_FLASH_ATTR
 		INFO("MESH ONLINE, CONNECT TO SERVER...\r\n");
 	    user_esp_platform_connect_ap_cb();
 	}else{
-		INFO("MESH LOCAL, DO NOT CONNECT SERVER...\r\n");
+		INFO("MESH NOT ONLINE: %d, DO NOT CONNECT SERVER...\r\n",espconn_mesh_get_status());
 	}
 
 }
@@ -194,16 +219,25 @@ void ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
     WIFI_ConnectCb(uint8_t status)
 {
+	//INFO("------------------\r\n");
+	//INFO("WIFI_ConnectCb\r\n");
     //wifi_station_set_auto_connect(1);
     if(wifiReconFlg && (ap_cache_if==false)){
+		INFO("------------------\r\n");
+	    INFO("001\r\n");
 		wifiReconFlg = false;
 		INFO("WIFI RECONN FLG: %d \r\n",wifiReconFlg);
 		INFO("DO AP CACHE\r\n");
+		os_timer_disarm(&ap_cache_t);
+		os_timer_setfn(&ap_cache_t,APCache_TimeoutCb,NULL);
+		os_timer_arm(&ap_cache_t,AP_CACHE_TOUT_MS,0);
 		APCache_Connect();	
 		return;
     }
     
     if(status == STATION_GOT_IP){
+		//INFO("------------------\r\n");
+	    //INFO("002\r\n");
 		#if ESP_TOUCH_SUPPORT
 		esptouch_setAckFlag(true);
 		#endif
@@ -223,10 +257,15 @@ void ICACHE_FLASH_ATTR
 		    user_esp_platform_connect_ap_cb();
 		#endif
     }else{
-		if((status != STATION_IDLE)&&(status != STATION_CONNECTING)){
-			_LINE_DESP();
+		//if((status != STATION_IDLE)&&(status != STATION_CONNECTING)){
+		//INFO("------------------\r\n");
+	    //INFO("003\r\n");
+		if(status != STATION_CONNECTING){
+			//_LINE_DESP();
+			INFO("---------------------\r\n");
 			INFO("STATION STATUS: %d \r\n",status);
-			_LINE_DESP();
+			INFO("---------------------\r\n");
+			//_LINE_DESP();
 			APCache_Connect();
 		}
 
@@ -237,20 +276,26 @@ void ICACHE_FLASH_ATTR
 
 static void ICACHE_FLASH_ATTR WIFI_CheckIp(void *arg)
 {
+	//INFO("-----------------\r\n");
+	//INFO("WIFI_CheckIp \r\n");
 	
 	os_timer_disarm(&WiFiLinker);
 
 	#if ESP_MESH_SUPPORT
 		if(MESH_DISABLE != espconn_mesh_get_status()){
 			/*MESH layer would handle wifi status exception at first*/
-			os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
+			//os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
 			os_timer_arm(&WiFiLinker, 1000, 0);
 			return;
 		}else{
 			wifiReconFlg = true;
+			INFO("wifiReconFlg : %d \r\n",wifiReconFlg);
+			INFO("ap_cache_if: %d \r\n",ap_cache_if);
+			
 			INFO("MESH STATUS : %d \r\n",espconn_mesh_get_status());
 			INFO("WIFI STATUS : CUR:%d ; LAST:%d\r\n",wifiStatus,lastWifiStatus);
 			INFO("----------------\r\n");
+			//user_StopClientTimer();
 		}
 	#endif
 	
@@ -259,7 +304,9 @@ static void ICACHE_FLASH_ATTR WIFI_CheckIp(void *arg)
 	wifiStatus = wifi_station_get_connect_status();
 	if (wifiStatus == STATION_GOT_IP && ipConfig.ip.addr != 0)
 	{
-		os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
+		//os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
+		//INFO("----------------\r\n");
+	    //INFO("STATION_GOT_IP\r\n");
 		os_timer_arm(&WiFiLinker, 2000, 0);
 	}
 	else
@@ -296,7 +343,7 @@ static void ICACHE_FLASH_ATTR WIFI_CheckIp(void *arg)
 		}else{
 			INFO("STATUS ERROR\r\n");
 		}
-		os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
+		//os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
 		os_timer_arm(&WiFiLinker, 1000, 0);
 	}
 	if(wifiStatus != lastWifiStatus || wifiReconFlg){
@@ -316,7 +363,7 @@ void ICACHE_FLASH_ATTR
 	struct station_config stationConf;
 
 	INFO("WIFI_INIT\r\n");
-	wifi_set_opmode(STATIONAP_MODE);//
+	wifi_set_opmode(STATION_MODE);//
 	//wifi_station_set_auto_connect(FALSE);
 	if(cb){
 	    wifiCb = cb;
@@ -350,6 +397,9 @@ void ICACHE_FLASH_ATTR
 	WIFI_StartCheckIp()
 {
 	lastWifiStatus = wifiStatus;
+	
+	os_timer_disarm(&WiFiLinker);
+	os_timer_setfn(&WiFiLinker, (os_timer_func_t *)WIFI_CheckIp, NULL);
     WIFI_CheckIp(NULL);
 }
 

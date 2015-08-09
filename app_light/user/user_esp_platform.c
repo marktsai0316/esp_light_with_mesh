@@ -34,29 +34,30 @@
 #define ESP_DBG
 #endif
 
-#define ACTIVE_FRAME    "{\"nonce\": %d,\"path\": \"/v1/device/activate/\", \"method\": \"POST\", \"body\": {\"encrypt_method\": \"PLAIN\", \"token\": \"%s\", \"bssid\": \""MACSTR"\",\"rom_version\":\"%s\"}, \"meta\": {\"Authorization\": \"token %s\",\"mode\":\"v\"}}\n"
+#define ACTIVE_FRAME    "{\"nonce\": %u,\"path\": \"/v1/device/activate/\", \"method\": \"POST\", \"body\": {\"encrypt_method\": \"PLAIN\", \"token\": \"%s\", \"bssid\": \""MACSTR"\",\"rom_version\":\"%s\"}, \"meta\": {\"Authorization\": \"token %s\",\"mode\":\"v\"}}\n"
 
 #if PLUG_DEVICE
 #include "user_plug.h"
 
-#define RESPONSE_FRAME  "{\"status\": 200, \"datapoint\": {\"x\": %d}, \"nonce\": %d, \"deliver_to_device\": true}\n"
-#define FIRST_FRAME     "{\"nonce\": %d, \"path\": \"/v1/device/identify\", \"method\": \"GET\",\"meta\": {\"Authorization\": \"token %s\"}}\n"
+#define RESPONSE_FRAME  "{\"status\": 200, \"datapoint\": {\"x\": %d}, \"nonce\": %u, \"deliver_to_device\": true}\n"
+#define FIRST_FRAME     "{\"nonce\": %u, \"path\": \"/v1/device/identify\", \"method\": \"GET\",\"meta\": {\"Authorization\": \"token %s\"}}\n"
 
 #elif LIGHT_DEVICE
 #include "user_light.h"
 #include "user_light_mesh.h"
+#include "user_light_hint.h"
 
-#define RESPONSE_FRAME  "{\"status\": 200,\"nonce\": %d, \"datapoint\": {\"x\": %d,\"y\": %d,\"z\": %d,\"k\": %d,\"l\": %d},\"deliver_to_device\":true}\n"
-#define FIRST_FRAME     "{\"nonce\": %d, \"path\": \"/v1/device/identify\", \"method\": \"GET\",\"meta\": {\"mode\":\"v\",\"Authorization\": \"token %s\"}}\n"
-#define MESH_UPGRADE    "{\"nonce\": %d, \"get\": {\"action\": \"download_rom_base64\", \"version\": \"%s\", \"filename\": \"%s\", \"offset\": %d, \"size\": %d}, \"meta\": {\"Authorization\": \"token %s\"}, \"path\": \"/v1/device/rom/\", \"method\": \"GET\"}\n"
+#define RESPONSE_FRAME  "{\"status\": 200,\"nonce\": %u, \"datapoint\": {\"x\": %d,\"y\": %d,\"z\": %d,\"k\": %d,\"l\": %d},\"deliver_to_device\":true}\n"
+#define FIRST_FRAME     "{\"nonce\": %u, \"path\": \"/v1/device/identify\", \"method\": \"GET\",\"meta\": {\"mode\":\"v\",\"Authorization\": \"token %s\"}}\n"
+#define MESH_UPGRADE    "{\"nonce\": %u, \"get\": {\"action\": \"download_rom_base64\", \"version\": \"%s\", \"filename\": \"%s\", \"offset\": %d, \"size\": %d}, \"meta\": {\"Authorization\": \"token %s\"}, \"path\": \"/v1/device/rom/\", \"method\": \"GET\"}\n"
 #elif SENSOR_DEVICE
 #include "user_sensor.h"
 
 #if HUMITURE_SUB_DEVICE
-#define UPLOAD_FRAME  "{\"nonce\": %d, \"path\": \"/v1/datastreams/tem_hum/datapoint/\", \"method\": \"POST\", \
+#define UPLOAD_FRAME  "{\"nonce\": %u, \"path\": \"/v1/datastreams/tem_hum/datapoint/\", \"method\": \"POST\", \
 \"body\": {\"datapoint\": {\"x\": %s%d.%02d,\"y\": %d.%02d}}, \"meta\": {\"Authorization\": \"token %s\"}}\n"
 #elif FLAMMABLE_GAS_SUB_DEVICE
-#define UPLOAD_FRAME  "{\"nonce\": %d, \"path\": \"/v1/datastreams/flammable_gas/datapoint/\", \"method\": \"POST\", \
+#define UPLOAD_FRAME  "{\"nonce\": %u, \"path\": \"/v1/datastreams/flammable_gas/datapoint/\", \"method\": \"POST\", \
 \"body\": {\"datapoint\": {\"x\": %d.%03d}}, \"meta\": {\"Authorization\": \"token %s\"}}\n"
 #endif
 
@@ -68,7 +69,7 @@ LOCAL uint32 count = 0;
 
 #if PLUG_DEVICE || LIGHT_DEVICE
 #define BEACON_FRAME    "{\"path\": \"/v1/ping/\", \"method\": \"POST\",\"meta\": {\"Authorization\": \"token %s\"}}\n"
-#define RPC_RESPONSE_FRAME  "{\"status\": %d, \"nonce\": %d, \"deliver_to_device\": true}\n"
+#define RPC_RESPONSE_FRAME  "{\"status\": %d, \"nonce\": %u, \"deliver_to_device\": true}\n"
 #define TIMER_FRAME     "{\"body\": {}, \"get\":{\"is_humanize_format_simple\":\"true\"},\"meta\": {\"Authorization\": \"Token %s\"},\"path\": \"/v1/device/timers/\",\"post\":{},\"method\": \"GET\"}\n"
 #define pheadbuffer "Connection: keep-alive\r\n\
 Cache-Control: no-cache\r\n\
@@ -101,7 +102,7 @@ LOCAL uint8 device_recon_count = 0;
 LOCAL uint32 active_nonce = 0xffffffff;
 LOCAL uint8 iot_version[IOT_BIN_VERSION_LEN + 1] = {0};
 LOCAL uint8_t g_mesh_version[IOT_BIN_VERSION_LEN + 1] = {0};
-LOCAL uint8_t g_devkey[token_size] = {0};//
+LOCAL uint8_t g_devkey[TOKEN_SIZE] = {0};//
 LOCAL uint8 mdns_init_flg = 0;
 struct rst_info rtc_info;
 void user_esp_platform_check_ip(uint8 reset_flag);
@@ -109,6 +110,94 @@ void user_esp_platform_check_ip(uint8 reset_flag);
 bool mesh_json_add_elem(char *pbuf, size_t buf_size, char *elem, size_t elem_size);
 #endif
 LOCAL void user_esp_platform_sent_beacon(struct espconn *pespconn);
+
+
+char* ICACHE_FLASH_ATTR user_json_find_section(const char *pbuf,uint16 len,const char* section)
+{
+#if 0
+	return espconn_json_find_section(pbuf,len,section);
+#else
+    char* sect = NULL,c;
+	bool json_split = false;
+	if(!pbuf || !section)
+		return NULL;
+
+	sect = (char*)os_strstr(pbuf,section);
+
+    /*
+    * the formal json format
+    *{"elem":"value"}\r\n
+    *{"elem":value}\r\n
+    */
+    if(sect){
+        sect += os_strlen(section);
+		while((uint32)sect<(uint32)(pbuf + len)){
+            c = *sect++;
+			if(c == ':' && !json_split){
+                json_split = true;
+				continue;
+			}
+			//{"elem":"value"}\r\n
+			if(c == '"'){
+                break;
+			}
+			//{"elem":value}\r\n
+			//{"elem":  value}\r\n
+			//{"elem":\tvalue}\r\n
+			//{"elem":\nvalue}\r\n
+			//{"elem":\rvalue}\r\n
+			if(c != ' ' && c!='\n' && c!='\r'){
+                sect--;
+				break;
+			}
+		}
+		return sect == NULL || (uint32)sect - (uint32)pbuf >= len?NULL:sect ;
+
+    }
+
+#endif
+}
+
+uint32 ICACHE_FLASH_ATTR
+	user_JsonGetValueInt(const char* pbuffer,uint16 buf_len,const uint8* json_key)
+{
+#if 0
+    return user_json_get_value(pbuffer,buf_len,json_key);
+#else
+    char val[20];
+	uint32 result = 0;
+	char* pstr = NULL,*pparse = NULL;
+	uint16 val_size=0;
+
+	pstr = user_json_find_section(pbuffer,buf_len,json_key);
+
+	if(pstr){
+        //find the end char of value
+        if( (pparse = (char*)os_strstr(pstr,","))!= NULL ||
+			(pparse = (char*)os_strstr(pstr,"\""))!= NULL ||
+			(pparse = (char*)os_strstr(pstr,"}"))!= NULL ||
+			(pparse = (char*)os_strstr(pstr,"]"))!= NULL){
+			val_size = pparse - pstr;
+        }else{
+            return 0;
+        }
+	    os_memset(val,0,sizeof(val));
+
+		if(val_size > sizeof(val))
+			os_memcpy(val,pstr,sizeof(val));
+		else
+			os_memcpy(val,pstr,val_size);
+
+		result = atol(val);
+
+
+	}
+
+	return result;
+
+#endif
+
+}
 
 void ICACHE_FLASH_ATTR espconn_esp_sent(struct espconn *pconn, uint8_t *buf, uint16_t len)
 {
@@ -137,6 +226,7 @@ void ICACHE_FLASH_ATTR espconn_esp_sent(struct espconn *pconn, uint8_t *buf, uin
 	}
 #endif
 }
+#if 0
 /******************************************************************************
  * FunctionName : user_esp_platform_load_param
  * Description  : load parameter from flash, toggle use two sector by flag value.
@@ -193,7 +283,7 @@ user_esp_platform_save_param_t(struct esp_platform_saved_param *param)
                         (uint32 *)&flag, sizeof(struct esp_platform_sec_flag_param));
     }
 }
-
+#endif
 /******************************************************************************
  * FunctionName : user_esp_platform_get_token
  * Description  : get the espressif's device token
@@ -277,7 +367,8 @@ user_esp_platform_get_connect_status(void)
 int ICACHE_FLASH_ATTR
 user_esp_platform_parse_nonce(char *pbuffer, uint16_t buf_len)
 {
-    return user_json_get_value(pbuffer, buf_len, "\"nonce\"");
+    return user_JsonGetValueInt(pbuffer, buf_len, "\"nonce\"");
+    //return user_json_get_value(pbuffer, buf_len, "\"nonce\"");
 }
 
 /******************************************************************************
@@ -370,12 +461,12 @@ user_esp_platform_set_info(struct espconn *pconn, uint8 *pbuffer)
             //pdata = (char *)os_zalloc(length + 1);
             //os_memcpy(pdata, pstr, length);
 
-            period = user_json_get_value(pstr, length, "\"x\"");
+            period = user_JsonGetValueInt(pstr, length, "\"x\"");
             //user_light_set_period(data);
-            rr = user_json_get_value(pstr, length, "\"y\"");
-            gg = user_json_get_value(pstr, length, "\"z\"");
-            bb = user_json_get_value(pstr, length, "\"k\"");
-			cw = user_json_get_value(pstr, length, "\"l\"");
+            rr = user_JsonGetValueInt(pstr, length, "\"y\"");
+            gg = user_JsonGetValueInt(pstr, length, "\"z\"");
+            bb = user_JsonGetValueInt(pstr, length, "\"k\"");
+			cw = user_JsonGetValueInt(pstr, length, "\"l\"");
 			ww = cw;
         }
     //}
@@ -492,10 +583,19 @@ user_esp_platform_discon(struct espconn *pespconn)
     user_link_led_output(1);
 #endif
 
+
+#if ESP_MESH_SUPPORT
+    #if ESP_MESH_STRIP
+    espconn_mesh_disconnect(pespconn);
+	#else
+	espconn_disconnect(pespconn);
+	#endif
+#else
 #ifdef CLIENT_SSL_ENABLE
     espconn_secure_disconnect(pespconn);
 #else
     espconn_disconnect(pespconn);
+#endif
 #endif
 }
 
@@ -535,7 +635,7 @@ user_esp_platform_sent_cb(void *arg)
 LOCAL void ICACHE_FLASH_ATTR
 user_esp_platform_sent(struct espconn *pespconn)
 {
-    uint8 devkey[token_size] = {0};
+    uint8 devkey[TOKEN_SIZE] = {0};
 	os_memcpy(devkey,esp_param.devkey,sizeof(esp_param.devkey));
     uint32 nonce;
     //char *pbuf = (char *)os_zalloc(packet_size);
@@ -554,7 +654,7 @@ user_esp_platform_sent(struct espconn *pespconn)
 
     if (pbuf != NULL) {
         if (esp_param.activeflag == 0) {
-            uint8 token[token_size] = {0};
+            uint8 token[TOKEN_SIZE] = {0};
             uint8 bssid[6];
             active_nonce = os_random()&0x7fffffff;//rand();// os_random();
 
@@ -580,6 +680,7 @@ user_esp_platform_sent(struct espconn *pespconn)
             }
 
             os_sprintf(pbuf, ACTIVE_FRAME, active_nonce, token, MAC2STR(bssid),iot_version, devkey);
+			ESP_DBG("PBUF1 MAX:512; LEN: %d \r\n",os_strlen(pbuf));
 			//os_sprintf(pbuf, ACTIVE_FRAME, active_nonce, token, MAC2STR(bssid), iot_version, g_devkey);
         }
 
@@ -625,7 +726,7 @@ user_esp_platform_sent(struct espconn *pespconn)
 #endif
 #else
         else {
-            nonce = os_random()&0x7fffffff;//rand();//os_random();
+            nonce = os_random()&0x7fffffff;
             os_sprintf(pbuf, FIRST_FRAME, nonce , devkey);
         }
 
@@ -676,12 +777,16 @@ user_esp_platform_sent_beacon(struct espconn *pespconn)
     }
 
     wifi_get_ip_info(STATION_IF, &ipconfig);
-    if (pespconn->state == ESPCONN_CONNECT) {
+    ESP_DBG("===============\r\n");
+	ESP_DBG("ESPCONN STATE: %d \r\n",pespconn->state);
+	ESP_DBG("===============\r\n");
+    if(pespconn->state == ESPCONN_CONNECT) { 
+
         if (esp_param.activeflag == 0) {
             ESP_DBG("please check device is activated.\n");
             user_esp_platform_sent(pespconn);
         } else {
-            uint8 devkey[token_size] = {0};
+            uint8 devkey[TOKEN_SIZE] = {0};
             os_memcpy(devkey, esp_param.devkey, 40);
 
             ESP_DBG("%s %u\n", __func__, system_get_time());
@@ -689,8 +794,10 @@ user_esp_platform_sent_beacon(struct espconn *pespconn)
             if (ping_status == 0) {
                 ESP_DBG("user_esp_platform_sent_beacon sent fail!\n");
 				#if ESP_MESH_SUPPORT==0
-                user_esp_platform_discon(pespconn);
+                    user_esp_platform_discon(pespconn);
 				#else
+				    //user_esp_platform_check_ip(0);
+				
 				if (!espconn_mesh_local_addr(&ipconfig.ip)) {
                     os_timer_disarm(&beacon_timer);
                     ping_status = 1;
@@ -698,6 +805,7 @@ user_esp_platform_sent_beacon(struct espconn *pespconn)
                 }else{
 					user_esp_platform_check_ip(0);
                 }
+                
 				#endif
             } else {
                 //char *pbuf = (char *)os_zalloc(packet_size);
@@ -713,18 +821,55 @@ user_esp_platform_sent_beacon(struct espconn *pespconn)
 						g_mac = (char*)mesh_GetMdevMac();
 						mesh_json_add_elem(pbuf, sizeof(pbuf), g_mac, ESP_MESH_JSON_DEV_MAC_ELEM_LEN);
 					}
+					
+					uint8* info_mesh = NULL;
+					uint8 g_prnt_mac[33];
+					uint8 cnt=0,i=0;
+					if (espconn_mesh_get_node_info(MESH_NODE_PARENT, &info_mesh, &cnt)) {
+						os_printf("get parent info success\n");
+						if (cnt == 0) {
+							os_printf("no parent\n");
+						} else {
+						    // children represents the count of children.
+						    // you can read the child-information from child_info.
+						    for(i=0;i<cnt;i++){
+						        //os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+						        os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(info_mesh+i*6));
+					        }
+						    os_memset(g_prnt_mac,0,sizeof(g_prnt_mac));
+						    if(mesh_root_if()){
+						        os_sprintf(g_prnt_mac,"\"parent_mdev_mac\":\"%02X%02X%02X%02X%02X%02X\"",MAC2STR(info_mesh));
+                            }else{
+							    os_sprintf(g_prnt_mac,"\"parent_mdev_mac\":\"%02X%02X%02X%02X%02X%02X\"",0x18,MAC2STR5BYTES(info_mesh));
+						   	}
+							os_printf("g_prnt_mac: %s \r\n",g_prnt_mac);
+						}
+					} else {
+						os_printf("get parent info fail\n");
+						info_mesh = NULL;
+						cnt = 0;
+					} 
+
+					if(info_mesh!=NULL && cnt>0){
+						mesh_json_add_elem(pbuf, sizeof(pbuf), g_prnt_mac, ESP_MESH_JSON_DEV_PRNT_MAC_ELEM_LEN);
+					}else{
+						mesh_json_add_elem(pbuf, sizeof(pbuf), "000000000000", ESP_MESH_JSON_DEV_PRNT_MAC_ELEM_LEN);
+					}
+
+					
 					//debug only
 					char *router = ESP_MESH_ROUTER_STRING;
 					if (!mesh_json_add_elem(pbuf, sizeof(pbuf), router, ESP_MESH_JSON_ROUTER_ELEM_LEN)) {
 						return;
 					}
 					//debug
-						
-                    #endif
-                    espconn_esp_sent(pespconn, pbuf, os_strlen(pbuf));
-                    if (!espconn_mesh_local_addr(&ipconfig.ip)){
+		            if (!espconn_mesh_local_addr(&ipconfig.ip)){
                         ping_status = 0;
                     }
+                    #endif
+                    espconn_esp_sent(pespconn, pbuf, os_strlen(pbuf));
+					ESP_DBG("PBUF2 MAX:256; LEN: %d \r\n",os_strlen(pbuf));
+
                     os_timer_disarm(&beacon_timer);
                     os_timer_arm(&beacon_timer, BEACON_TIME, 0);
                     //os_free(pbuf);
@@ -732,7 +877,7 @@ user_esp_platform_sent_beacon(struct espconn *pespconn)
             }
         }
     } else {
-        ESP_DBG("user_esp_platform_sent_beacon sent fail! TCP NOT CONNECT\n");
+        ESP_DBG("user_esp_platform_sent_beacon sent fail! TCP NOT CONNECT:%d\n",pespconn->state == ESPCONN_CONNECT);
 		#if ESP_MESH_SUPPORT==0
         user_esp_platform_discon(pespconn);
 		#endif
@@ -778,6 +923,7 @@ user_platform_rpc_set_rsp(struct espconn *pespconn, int nonce, int status)
 		
 	#endif
     espconn_esp_sent(pespconn, pbuf, os_strlen(pbuf));
+	ESP_DBG("PBUF3 MAX:256; LEN: %d \r\n",os_strlen(pbuf));
     //os_free(pbuf);
 }
 
@@ -823,6 +969,7 @@ user_platform_rpc_battery_rsp(struct espconn *pespconn, int nonce, int status)
 	
 	#endif
     espconn_esp_sent(pespconn, pbuf, os_strlen(pbuf));
+	ESP_DBG("PBUF4 MAX:256; LEN: %d \r\n",os_strlen(pbuf));
     //os_free(pbuf);
 }
 
@@ -835,7 +982,7 @@ user_platform_rpc_battery_rsp(struct espconn *pespconn, int nonce, int status)
 LOCAL void ICACHE_FLASH_ATTR
 user_platform_timer_get(struct espconn *pespconn)
 {
-    uint8 devkey[token_size] = {0};
+    uint8 devkey[TOKEN_SIZE] = {0};
 	os_memcpy(devkey, esp_param.devkey, 40);
     //char *pbuf = (char *)os_zalloc(packet_size);
     char pbuf[512];
@@ -866,6 +1013,7 @@ user_platform_timer_get(struct espconn *pespconn)
 	
 	ESP_DBG("========================\r\n");
 	ESP_DBG("%s \r\n",__func__);
+	ESP_DBG("PBUF5 MAX:512; LEN: %d \r\n",os_strlen(pbuf));
 	ESP_DBG("------------------\r\n");
     ESP_DBG("%s\n", pbuf);
 	ESP_DBG("========================\r\n");
@@ -994,9 +1142,15 @@ void ICACHE_FLASH_ATTR
     os_memset(pbuf, 0, sizeof(pbuf));
 	if( system_upgrade_flag_check() == UPGRADE_FLAG_FINISH ) {
         os_sprintf(pbuf, UPGRADE_FRAME, g_devkey, "device_upgrade_success", iot_version, g_mesh_version);
+		#if LIGHT_DEVICE
+    		light_shadeStart(HINT_WHITE,1000,4);
+		#endif
 	} else {
         os_sprintf(pbuf, UPGRADE_FRAME, g_devkey, "device_upgrade_failed", iot_version, g_mesh_version);
 		system_upgrade_flag_set(UPGRADE_FLAG_IDLE);
+        #if LIGHT_DEVICE
+    		light_shadeStart(HINT_RED,1000,4);
+        #endif
 	}
     if (g_sip)
         mesh_json_add_elem(pbuf, sizeof(pbuf), g_sip, ESP_MESH_JSON_IP_ELEM_LEN);
@@ -1045,10 +1199,10 @@ user_mesh_upgrade_continue(struct espconn *esp, char *pkt, size_t pkt_len,
     char *pstr = NULL;
     char buffer[512] = {0};
     char *version = "\"version\":";
-    int nonce = user_json_get_value(pkt, pkt_len, "\"nonce\":");
+    int nonce = user_JsonGetValueInt(pkt, pkt_len, "\"nonce\":");
     os_memset(buffer, 0, sizeof(buffer));
     if (g_mesh_version[0] == 0) {
-        version = espconn_json_find_section(pkt, pkt_len, version);
+        version = user_json_find_section(pkt, pkt_len, version);
         if (version)
             os_memcpy(g_mesh_version, version, IOT_BIN_VERSION_LEN);
     }
@@ -1084,16 +1238,18 @@ user_esp_mesh_upgrade(struct espconn *esp, char *pkt, size_t pkt_len, char *base
     uint16_t sect_len, base64_len, bin_len;
     uint32_t total_len = 0, offset = 0;	
 	int idx;
-    sect_len = user_json_get_value(pkt, pkt_len, "\"size\":");
-    base64_len = user_json_get_value(pkt, pkt_len, "\"size_base64\":");
-    offset = user_json_get_value(pkt, pkt_len, "\"offset\":");
-    total_len = user_json_get_value(pkt, pkt_len, "\"total\":");
+    sect_len = user_JsonGetValueInt(pkt, pkt_len, "\"size\":");
+    base64_len = user_JsonGetValueInt(pkt, pkt_len, "\"size_base64\":");
+    offset = user_JsonGetValueInt(pkt, pkt_len, "\"offset\":");
+    total_len = user_JsonGetValueInt(pkt, pkt_len, "\"total\":");
 	if(offset==0 && total_len>0){
 		ESP_DBG("ERASE FLASH FOR UPGRADE \r\n");
 		ESP_DBG("TOTAL LEN: %d \r\n",total_len);
 		system_upgrade_erase_flash(total_len);
 	}
     if (offset + sect_len <= total_len) {
+
+		
         char c = base64_bin[base64_len];
         base64_bin[base64_len] = '\0';
         bin_len = base64Decode(base64_bin, base64_len + 1, &bin_file);
@@ -1101,6 +1257,12 @@ user_esp_mesh_upgrade(struct espconn *esp, char *pkt, size_t pkt_len, char *base
 		os_printf("test bin: len: %d \r\n",bin_len);
 		//for(idx=0;idx<bin_len;idx++) os_printf("%02x ",bin_file[idx]);
 		//os_printf("-----------\r\n");
+		if(UPGRADE_FLAG_START != system_upgrade_flag_check()){
+			os_printf("-------------------\r\n");
+			os_printf("UPGRADE ALREADY STOPPED...ERROR OR TIMEOUT...\r\n");
+			os_printf("-------------------\r\n");
+			return;
+		}
         system_upgrade(bin_file, bin_len);
         if (bin_file)
             os_free(bin_file);
@@ -1116,7 +1278,7 @@ user_esp_mesh_upgrade(struct espconn *esp, char *pkt, size_t pkt_len, char *base
         os_timer_disarm(&g_mesh_upgrade_timer);
         mesh_upgrade_check_func(esp);
     } else {  // upgrade fail
-        user_platform_rpc_set_rsp(esp, user_json_get_value(pkt, pkt_len, "\"nonce\":"), 400);
+        user_platform_rpc_set_rsp(esp, user_JsonGetValueInt(pkt, pkt_len, "\"nonce\":"), 400);
         system_upgrade_flag_set(UPGRADE_FLAG_IDLE);
         os_timer_disarm(&g_mesh_upgrade_timer);
 		
@@ -1139,7 +1301,7 @@ user_esp_mesh_upgrade_begin(struct espconn *esp, int nonce, uint8_t *pkt, uint16
     user_mesh_upgrade_continue(esp, pkt, pkt_len, 0, MESH_UPGRADE_SEC_SIZE);//1000
     os_timer_disarm(&g_mesh_upgrade_timer);
     os_timer_setfn(&g_mesh_upgrade_timer, (os_timer_func_t *)mesh_upgrade_check_func, g_mesh_esp);
-    os_timer_arm(&g_mesh_upgrade_timer, 300000, 0);
+    os_timer_arm(&g_mesh_upgrade_timer, 600000, 0);
 }
 
 #endif
@@ -1174,7 +1336,8 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
 #endif
     char *pstr = NULL;
 	#if ESP_MESH_SUPPORT
-	char pbuffer[1024 * 2] = {0};//It is suppoosed that in mesh solution, we will only receive a entire packet
+	//char pbuffer[1024 * 2] = {0};//It is suppoosed that in mesh solution, we will only receive a entire packet
+	char* pbuffer = pusrdata;
 	#else
     LOCAL char pbuffer[1024 * 2] = {0};
 	#endif
@@ -1193,9 +1356,22 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
         #endif
         os_memcpy(pbuffer, pusrdata, length);
     } else {
+
     
 	PARSE:
+		#if !ESP_MESH_SUPPORT
         os_memcpy(pbuffer + os_strlen(pbuffer), pusrdata, length);
+		#endif
+
+		
+	    if(NULL != (char*)os_strstr(pbuffer,"Content-Length")){
+			webserver_recv(pespconn, pbuffer, length);
+	        #if (PLUG_DEVICE || LIGHT_DEVICE)
+				os_timer_disarm(&beacon_timer);
+				os_timer_arm(&beacon_timer, BEACON_TIME, 0);
+	        #endif
+			return;
+		}
 		
 		ESP_DBG("========================\r\n");
 		ESP_DBG("user_esp_platform_recv_cb \r\n");
@@ -1203,7 +1379,11 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
 		ESP_DBG("------------------\r\n");
 		ESP_DBG("%s \r\n",pbuffer);
 		ESP_DBG("========================\r\n");
+
 		
+
+
+
         struct espconn *pespconn = (struct espconn *)arg;
 		#if ESP_MESH_SUPPORT
 		g_sip = (char *)os_strstr(pusrdata, ESP_MESH_SIP_STRING);
@@ -1218,13 +1398,13 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
 
 		//ESP_DBG("================================\r\n");
 		//ESP_DBG("ACTIVATE INFO: \r\n");
-		//ESP_DBG("TEST NOUNCE: %d	;	%d	\r\n",user_esp_platform_parse_nonce(pbuffer,length),active_nonce);
+		//ESP_DBG("TEST NOUNCE: %u	;	%u	\r\n",user_esp_platform_parse_nonce(pbuffer,length),active_nonce);
 		//ESP_DBG(" TEST PARSE: %s \r\n",(char *)os_strstr(pbuffer, "\"activate_status\": "));
 		//ESP_DBG("================================\r\n");
 
 
-        if ((pstr = espconn_json_find_section(pbuffer, length, "\"activate_status\":")) != NULL &&
-        //if ((pstr = espconn_json_find_section(pbuffer, length, "\"status\": ")) != NULL &&
+        if ((pstr = user_json_find_section(pbuffer, length, "\"activate_status\":")) != NULL &&
+        //if ((pstr = user_json_find_section(pbuffer, length, "\"status\": ")) != NULL &&
             user_esp_platform_parse_nonce(pbuffer, length) == active_nonce) {
             //os_printf("get nounce: %d ; ori nonce  : %d \r\n",user_esp_platform_parse_nonce(pbuffer, length),active_nonce);
 			
@@ -1260,10 +1440,10 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
 	
 
 #if (PLUG_DEVICE || LIGHT_DEVICE)
-        else if ((pstr = espconn_json_find_section(pbuffer, length, "\"action\"")) != NULL) {
+        else if ((pstr = user_json_find_section(pbuffer, length, "\"action\"")) != NULL) {
             int nonce = user_esp_platform_parse_nonce(pbuffer, length);
             if (!os_memcmp(pstr, "sys_upgrade", os_strlen("sys_upgrade"))) {  // upgrade start
-                if ((pstr = espconn_json_find_section(pbuffer, length, "\"version\"")) != NULL) {
+                if ((pstr = user_json_find_section(pbuffer, length, "\"version\"")) != NULL) {
 					#if ESP_MESH_SUPPORT
                     if (espconn_mesh_get_status() == MESH_DISABLE) {  // normal upgrade start
                         user_esp_upgrade_begin(pespconn, nonce, pstr);
@@ -1277,8 +1457,8 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
                     user_platform_rpc_set_rsp(pespconn, nonce, 400);
                 }
             } else if (!os_memcmp(pstr, "download_rom_base64", os_strlen("download_rom_base64"))) {
-                if ((pstr = espconn_json_find_section(pbuffer, length, "\"device_rom\"")) != NULL &&
-                    (pstr = espconn_json_find_section(pstr, length, "\"rom_base64\"")) != NULL) {
+                if ((pstr = user_json_find_section(pbuffer, length, "\"device_rom\"")) != NULL &&
+                    (pstr = user_json_find_section(pstr, length, "\"rom_base64\"")) != NULL) {
                     #if ESP_MESH_SUPPORT
                     user_esp_mesh_upgrade(pespconn, pbuffer, length, pstr);
 					#endif
@@ -1288,8 +1468,11 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
             } else if (!os_memcmp(pstr, "sys_reboot", os_strlen("sys_reboot"))) {
                 ESP_DBG("upgrade reboot..");
 				UART_WaitTxFifoEmpty(0,50000);
-                espconn_mesh_setup_timer(&client_timer, 100,
-                                         (os_timer_func_t *)system_upgrade_reboot, NULL, 0);
+                //espconn_mesh_setup_timer(&client_timer, 100,(os_timer_func_t *)system_upgrade_reboot, NULL, 0);
+				os_timer_disarm(&client_timer);
+				os_timer_setfn(&client_timer, (os_timer_func_t *)system_upgrade_reboot, NULL);
+				os_timer_arm(&client_timer, 500, 0);
+				
                 user_platform_rpc_set_rsp(pespconn, nonce, 200);
             } else if(!os_memcmp(pstr, "get_battery", os_strlen("get_battery"))){
             
@@ -1299,8 +1482,10 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
         } else if ((pstr = (char *)os_strstr(pbuffer, "/v1/device/timers/")) != NULL) {
             int nonce = user_esp_platform_parse_nonce(pbuffer, length);
             user_platform_rpc_set_rsp(pespconn, nonce, 200);
-            espconn_mesh_setup_timer(&client_timer, 2000,
-                                     (os_timer_func_t *)user_platform_timer_get, pespconn, 0);
+            //espconn_mesh_setup_timer(&client_timer, 2000,(os_timer_func_t *)user_platform_timer_get, pespconn, 0);
+            os_timer_disarm(&client_timer);
+            os_timer_setfn(&client_timer, (os_timer_func_t *)user_platform_timer_get, pespconn);
+            os_timer_arm(&client_timer, 2000, 0);
         } else if ((pstr = (char *)os_strstr(pbuffer, "\"method\": ")) != NULL) {
             if (os_strncmp(pstr + 11, "GET", 3) == 0) {
                 user_esp_platform_get_info(pespconn, pbuffer);
@@ -1344,6 +1529,8 @@ user_esp_platform_recv_cb(void *arg, char *pusrdata, unsigned short length)
     os_timer_disarm(&beacon_timer);
     os_timer_arm(&beacon_timer, BEACON_TIME, 0);
 #endif
+
+ESP_DBG("END OF RCV CB\r\n");
 }
 
 #if AP_CACHE
@@ -1386,6 +1573,7 @@ user_esp_platform_ap_change(void)
 LOCAL bool ICACHE_FLASH_ATTR
 user_esp_platform_reset_mode(void)
 {
+	ESP_DBG("user_esp_platform_reset_mode\r\n");
     if (wifi_get_opmode() != STATIONAP_MODE) {
         wifi_set_opmode(STATIONAP_MODE);
     }
@@ -1466,6 +1654,7 @@ LOCAL void ICACHE_FLASH_ATTR
 user_esp_platform_connect_cb(void *arg)
 {
     struct espconn *pespconn = arg;
+	ping_status = 1;
 
     ESP_DBG("user_esp_platform_connect_cb\n");
 	os_printf("=======================\r\n");
@@ -1502,10 +1691,19 @@ user_esp_platform_connect(struct espconn *pespconn)
 {
     ESP_DBG("user_esp_platform_connect\n");
 
+#if ESP_MESH_SUPPORT
+    #if ESP_MESH_STRIP
+    espconn_mesh_connect(pespconn);
+	#else
+	espconn_connect(pespconn);
+	#endif
+
+#else
 #ifdef CLIENT_SSL_ENABLE
     espconn_secure_connect(pespconn);
 #else
     espconn_connect(pespconn);
+#endif
 #endif
 }
 
@@ -1555,11 +1753,11 @@ user_esp_platform_dns_found(const char *name, ip_addr_t *ipaddr, void *arg)
     if (esp_server_ip.addr == 0 && ipaddr->addr != 0) {
         os_timer_disarm(&client_timer);
 
-		#if ESP_MESH_SUPPORT
-		    mesh_StartReconnCheck(MESH_ONLINE);
-		#endif
+		//#if ESP_MESH_SUPPORT
+		//    mesh_StartReconnCheck(10000);
+		//#endif
 		
-		#if 0 //ESP_MESH_SUPPORT
+		#if ESP_MESH_SUPPORT
 		    ESP_DBG("MESH STATUS : %d \r\n",espconn_mesh_get_status());
 			//if(MESH_LOCAL_AVAIL == espconn_mesh_get_status()){
 			if(MESH_ONLINE_AVAIL != espconn_mesh_get_status()){
@@ -1567,8 +1765,11 @@ user_esp_platform_dns_found(const char *name, ip_addr_t *ipaddr, void *arg)
 				ESP_DBG("TRY TO ENABLE MESH ONLINE MODE\r\n");
 				ESP_DBG("--------------\r\n");
 		        //user_MeshInit();//reset to online mode
-		        mesh_StartReconnCheck(MESH_ONLINE);
+		        mesh_StartReconnCheck(10);
+				//mesh_ReconCheck();
 		        return;
+			}else{
+				mesh_StartReconnCheck(10000);
 			}
 		#endif
         esp_server_ip.addr = ipaddr->addr;
@@ -1602,22 +1803,32 @@ user_esp_platform_dns_found(const char *name, ip_addr_t *ipaddr, void *arg)
 LOCAL void ICACHE_FLASH_ATTR
 user_esp_platform_dns_check_cb(void *arg)
 {
+
+#if ESP_MESH_SUPPORT
     struct ip_info ipconfig;
     struct espconn *pespconn = arg;
     wifi_get_ip_info(STATION_IF, &ipconfig);
     os_timer_disarm(&client_timer);
-
-    ESP_DBG("user_esp_platform_dns_check_cb, ip:" IPSTR "server:" IPSTR "\n", 
-		IP2STR(&ipconfig.ip.addr), IP2STR(&esp_server_ip.addr));
-
+    ESP_DBG("user_esp_platform_dns_check_cb, ip:" IPSTR "server:" IPSTR "\n", IP2STR(&ipconfig.ip.addr), IP2STR(&esp_server_ip.addr));
 	ESP_DBG("IPADDR_ANY : %08x ; %d\r\n",IPADDR_ANY,(ipconfig.ip.addr == IPADDR_ANY));
+	
     //espconn_gethostbyname(pespconn, ESP_DOMAIN, &esp_server_ip, user_esp_platform_dns_found);
     if (ipconfig.ip.addr == IPADDR_ANY || !espconn_mesh_local_addr(&ipconfig.ip)) {
-		ESP_DBG("TEST IN NORMAL BRANCK\r\n");
+		ESP_DBG("TEST IN NORMAL BRANCH\r\n");
         if (esp_server_ip.addr == IPADDR_ANY) {
 			ESP_DBG("SERVER IP ZERO\r\n");
             espconn_gethostbyname(pespconn, ESP_DOMAIN, &esp_server_ip, user_esp_platform_dns_found);
             os_timer_disarm(&client_timer);
+			
+			//#if ESP_MESH_SUPPORT
+			if(MESH_DISABLE == espconn_mesh_get_status()){
+				os_printf("MESH DISABLE , RETURN...\r\n");
+				return;
+			}
+			
+			//#endif
+
+			
 			if(device_recon_count<5){
                 os_timer_arm(&client_timer, 1000, 0);
 			}else{
@@ -1630,6 +1841,13 @@ user_esp_platform_dns_check_cb(void *arg)
     	ESP_DBG("TEST IN IP GW\r\n");
         user_esp_platform_dns_found(ESP_DOMAIN, &ipconfig.gw, pespconn);
     }
+#else
+    struct espconn *pespconn = arg;
+    ESP_DBG("user_esp_platform_dns_check_cb\n");
+    espconn_gethostbyname(pespconn, ESP_DOMAIN, &esp_server_ip, user_esp_platform_dns_found);
+    os_timer_arm(&client_timer, 1000, 0);
+
+#endif
 }
 
 LOCAL void ICACHE_FLASH_ATTR
@@ -1639,10 +1857,14 @@ user_esp_platform_start_dns(struct espconn *pespconn)
 	esp_server_ip.addr = 0;
     ESP_DBG("user_esp_platform_start_dns\n");
     wifi_get_ip_info(STATION_IF, &ipconfig);
+	#if ESP_MESH_SUPPORT
     if (esp_server_ip.addr == 0 && !espconn_mesh_local_addr(&ipconfig.ip)) {
 	    esp_server_ip.addr = 0;
 		espconn_gethostbyname(pespconn, ESP_DOMAIN, &esp_server_ip, user_esp_platform_dns_found);
 	}
+	#else
+	espconn_gethostbyname(pespconn, ESP_DOMAIN, &esp_server_ip, user_esp_platform_dns_found);
+	#endif
 
     os_timer_disarm(&client_timer);
     os_timer_setfn(&client_timer, (os_timer_func_t *)user_esp_platform_dns_check_cb, pespconn);
@@ -1674,17 +1896,15 @@ void ICACHE_FLASH_ATTR
 		os_memset(mdns_info,0,sizeof(struct mdns_info));
 	}
 
-	mdns_info->host_name = "T_LIGHT";
+	mdns_info->host_name = "ESP_LIGHT";
     mdns_info->ipAddr= ipconfig.ip.addr; //sation ip
-
-	os_printf("STA IP: %08x\r\n",ipconfig.ip.addr);
-
 	//os_printf("mDNS ip: "IPSTR,IP2STR(info->ipAddr));
-    mdns_info->server_name = "T_MESH";
+    mdns_info->server_name = "ESP_MESH";
     mdns_info->server_port = 8000;
-    mdns_info->txt_data[0] = "version = 1.1.2";
+    mdns_info->txt_data[0] = "version = 1.2.0";
 	mdns_info->txt_data[1] = "vendor = espressif";
-	mdns_info->txt_data[2] = "mesh_en = 1";
+	mdns_info->txt_data[2] = "mesh_support = 1";
+	mdns_info->txt_data[3] = "PWM channel = 5";
     espconn_mdns_init(mdns_info);
 	espconn_mdns_server_register();
 }
@@ -1709,6 +1929,7 @@ void ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
 user_esp_platform_check_ip(uint8 reset_flag)
 {
+    //os_printf("%s\r\n",__func__);
     struct ip_info ipconfig;
     uint8_t wifi_status = STATION_IDLE;//
     os_timer_disarm(&client_timer);
@@ -1745,7 +1966,6 @@ user_esp_platform_check_ip(uint8 reset_flag)
 	}
 	
 //***************************
-
 
 #else
         user_conn.proto.tcp = &user_tcp;
@@ -1894,7 +2114,7 @@ user_esp_platform_init(void)
 
         wifi_softap_set_config(&config);
 #endif
-
+		ESP_DBG("user_esp_platform_init\r\n");
         wifi_set_opmode(STATIONAP_MODE);
     }
 
@@ -1918,12 +2138,33 @@ void ICACHE_FLASH_ATTR
 	user_esp_platform_set_reset_flg(uint32 rst)
 {
 	
-	esp_param.reset_flg = rst;
+	esp_param.reset_flg = rst&0xff;
 	//system_param_load(ESP_PARAM_START_SEC, 0, &esp_param, sizeof(esp_param));
 	system_param_save_with_protect(ESP_PARAM_START_SEC,&esp_param,sizeof(esp_param));
 }
 
-os_timer_t reset_flg_t;
+
+void ICACHE_FLASH_ATTR
+	user_esp_platform_reset_default()
+{
+#if ESP_MESH_SUPPORT
+	espconn_mesh_disable(NULL);
+#endif
+	esp_param.reset_flg=0;
+	esp_param.activeflag = 0;
+	ESP_DBG("--------------------\r\n");
+	ESP_DBG("SYSTEM PARAM RESET !\r\n");
+	ESP_DBG("RESET: %d ;  ACTIVE: %d \r\n",esp_param.reset_flg,esp_param.activeflag);
+	ESP_DBG("--------------------\r\n\n\n");
+	UART_WaitTxFifoEmpty(0,3000);
+	os_memset(esp_param.token,0,40);
+	system_param_save_with_protect(ESP_PARAM_START_SEC, &esp_param, sizeof(esp_param));
+	system_restore();
+	system_restart();
+
+
+}
+
 
 void ICACHE_FLASH_ATTR
 user_esp_platform_init_peripheral(void)
@@ -1942,30 +2183,6 @@ user_esp_platform_init_peripheral(void)
 	system_param_load(ESP_PARAM_START_SEC, 0, &esp_param, sizeof(esp_param));
     os_memset(g_devkey, 0, sizeof(g_devkey));
 	os_memcpy(g_devkey, esp_param.devkey, sizeof(esp_param.devkey));
-	
-	if(esp_param.reset_flg == 1){
-		system_restore();
-		esp_param.reset_flg=0;
-		esp_param.activeflag = 0;
-		os_memset(esp_param.token,0,40);
-		system_param_save_with_protect(ESP_PARAM_START_SEC, &esp_param, sizeof(esp_param));
-		ESP_DBG("--------------------\r\n");
-		ESP_DBG("SYSTEM PARAM RESET !\r\n");
-		ESP_DBG("RESET: %d ;  ACTIVE: %d \r\n",esp_param.reset_flg,esp_param.activeflag);
-		ESP_DBG("--------------------\r\n\n\n");
-		UART_WaitTxFifoEmpty(0,3000);
-		system_restart();
-	}else{
-	    ESP_DBG("==================\r\n");
-		ESP_DBG("RESET FLG==0 \r\n");
-		ESP_DBG("==================\r\n");
-		user_esp_platform_set_reset_flg(1);
-		os_timer_disarm(&reset_flg_t);
-		os_timer_setfn(&reset_flg_t,user_esp_platform_set_reset_flg,0);
-		os_timer_arm(&reset_flg_t,2000,0);
-	}
-	
-
 
 	struct rst_info *rtc_info = system_get_rst_info();
 
@@ -2042,6 +2259,7 @@ os_printf("-----------------\r\n");
         config.authmode = AUTH_WPA_WPA2_PSK;
         wifi_softap_set_config(&config);
 #endif
+        ESP_DBG("user_esp_platform_init_peripheral\r\n");
         wifi_set_opmode(STATIONAP_MODE);
     }
 
@@ -2086,11 +2304,17 @@ user_esp_platform_connect_ap_cb()
 //***************************
 #if LIGHT_DEVICE
 #if ESP_MDNS_SUPPORT
-
+	#if ESP_MESH_SUPPORT
+    if(mdns_init_flg==0 && !espconn_mesh_local_addr(&ipconfig.ip)){
+	    user_mdns_conf();
+	    mdns_init_flg=1;
+    }
+	#else
     if(mdns_init_flg==0){
 	    user_mdns_conf();
 	    mdns_init_flg=1;
     }
+	#endif
 #endif
 
 #endif
@@ -2131,10 +2355,24 @@ user_esp_platform_connect_ap_cb()
 
 
 const char* _line_sep = "===============\r\n";
-//#define _LINE_DESP()	os_printf("%s",_line_sep)
 void ICACHE_FLASH_ATTR _LINE_DESP()
 {
 	 ets_printf("%s",_line_sep);
 }
+
+
+
+#if ESP_DEBUG_MODE
+void* ICACHE_FLASH_ATTR user_GetUserPConn()
+{
+	return (&user_conn);
+}
+
+
+#endif
+
+
+
+
 
 #endif

@@ -57,7 +57,7 @@ LOCAL void esptouch_ProcCb(sc_status status, void *pdata)
 		case SC_STATUS_GETTING_SSID_PSWD:
 			SC_INFO("SC_STATUS_GETTING_SSID_PSWD\n");
 			#if LIGHT_DEVICE
-			light_shadeStart(HINT_BLUE,1000);
+			light_shadeStart(HINT_BLUE,1000,0);
 			#endif
 			if(esptouch_proc.esptouch_fail_cb){
 				os_timer_disarm(&esptouch_tout_t);
@@ -104,6 +104,8 @@ LOCAL void esptouch_ProcCb(sc_status status, void *pdata)
 void ICACHE_FLASH_ATTR
 	esptouch_SuccessCb(void* data)
 {
+	wifi_set_opmode(STATIONAP_MODE);
+	
 	os_timer_disarm(&esptouch_tout_t);//disable check timeout 
 	#if LIGHT_DEVICE
 	light_hint_stop(HINT_WHITE);
@@ -112,15 +114,16 @@ void ICACHE_FLASH_ATTR
 	
 	SC_INFO("ENABLE LIGHT ACTION(ESP-NOW)");
 	SC_INFO("debug: channel:%d\r\n",wifi_get_channel());
-#if ESP_NOW_SUPPORT
-	light_EspnowInit();
-#endif
-	SC_INFO("CONNECTED TO AP...ENABLE MESH AND RUN PLATFORM CODE ...WAIT...\r\n");
 #if ESP_MESH_SUPPORT
 	user_MeshInit();
 #else
     user_esp_platform_connect_ap_cb();
 #endif
+#if ESP_NOW_SUPPORT
+	light_EspnowInit();
+#endif
+	SC_INFO("CONNECTED TO AP...ENABLE MESH AND RUN PLATFORM CODE ...WAIT...\r\n");
+
 }
 
 /******************************************************************************
@@ -137,7 +140,7 @@ void ICACHE_FLASH_ATTR
 	SC_INFO("ESP-TOUCH FAIL \r\n");
 	os_timer_disarm(&esptouch_tout_t);
 	#if LIGHT_DEVICE
-	light_shadeStart(HINT_RED,2000);
+	light_shadeStart(HINT_RED,2000,0);
 	#endif
 	
 	SC_INFO("ENABLE LIGHT ACTION(ESP-NOW)");
@@ -166,7 +169,7 @@ void ICACHE_FLASH_ATTR
 {
     SC_INFO("LIGHT SHADE & START ESP-TOUCH");
 	#if LIGHT_DEVICE
-	light_shadeStart(HINT_GREEN,1000);
+	light_shadeStart(HINT_GREEN,1000,0);
 	#endif
 }
 
@@ -178,6 +181,8 @@ void ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
 	esptouch_FlowStart()
 {
+	
+	wifi_station_disconnect();
 #if ESP_NOW_SUPPORT
 	light_EspnowDeinit();
 #endif
@@ -202,24 +207,6 @@ void ICACHE_FLASH_ATTR
 	smartconfig_start(esptouch_ProcCb);
 
 }
-
-#if 0
-void ICACHE_FLASH_ATTR
-	esptouch_timer_stop()
-{
-	os_timer_disarm(&esptouch_tout_t);
-	#if LIGHT_DEVICE
-	light_hint_stop(HINT_WHITE);
-	#endif
-}
-
-void ICACHE_FLASH_ATTR
-	esptouch_flow_stop()
-{
-    esptouch_timer_stop();
-	smartconfig_stop();
-}
-#endif
 
 
 #endif

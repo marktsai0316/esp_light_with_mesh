@@ -299,27 +299,27 @@ uint32 ICACHE_FLASH_ATTR
 
     case LIGHT_RED : 
         if(duty_mapped>=0 && duty_mapped<23000){
-            return (duty_mapped*151000/22727);
+            return (duty_mapped*151000/22222);
         }
     
         break;
 
     case LIGHT_GREEN:
         if(duty_mapped>=0 && duty_mapped<23000){
-            return (duty_mapped*82000/22727);
+            return (duty_mapped*82000/22222);
         }
         break;
     
     case LIGHT_BLUE:
         if(duty_mapped>=0 && duty_mapped<23000){
-            return (duty_mapped*70000/22727);
+            return (duty_mapped*70000/22222);
         }
         break;
     
     case LIGHT_COLD_WHITE:
     case LIGHT_WARM_WHITE:
         if(duty_mapped>=0 && duty_mapped<23000){
-            return (duty_mapped*115000/22727);
+            return (duty_mapped*115000/22222);
         }
         break;
 		
@@ -340,6 +340,7 @@ uint32 ICACHE_FLASH_ATTR
 void ICACHE_FLASH_ATTR
 light_set_aim(uint32 r,uint32 g,uint32 b,uint32 cw,uint32 ww,uint32 period,u8 ctrl_mode)
 {
+	//os_printf("light_set_aim\r\n");
     struct pwm_param *tmp = LightEvtMalloc();    
     if(tmp != NULL){
         tmp->period = (period<10000?period:10000);
@@ -400,6 +401,9 @@ light_set_aim(uint32 r,uint32 g,uint32 b,uint32 cw,uint32 ww,uint32 period,u8 ct
         while((cur_cw+cur_ww) > cur_remain){
             tmp->duty[LIGHT_COLD_WHITE] =  tmp->duty[LIGHT_COLD_WHITE] * 9 / 10;
             tmp->duty[LIGHT_WARM_WHITE] =  tmp->duty[LIGHT_WARM_WHITE] * 9 / 10;
+
+
+			
             cur_cw = light_get_cur( tmp->duty[LIGHT_COLD_WHITE],LIGHT_COLD_WHITE, tmp->period);
             cur_ww = light_get_cur( tmp->duty[LIGHT_WARM_WHITE],LIGHT_WARM_WHITE, tmp->period);
         }	    
@@ -411,8 +415,8 @@ light_set_aim(uint32 r,uint32 g,uint32 b,uint32 cw,uint32 ww,uint32 period,u8 ct
 
 
 		
-	//os_printf("prd:%u  r : %u  g: %u  b: %u  cw: %u  ww: %u \r\n",period,
-	//	         tmp->duty[0],tmp->duty[1],tmp->duty[2],tmp->duty[3],tmp->duty[4]);
+	os_printf("prd:%u  r : %u  g: %u  b: %u  cw: %u  ww: %u \r\n",period,
+		         tmp->duty[0],tmp->duty[1],tmp->duty[2],tmp->duty[3],tmp->duty[4]);
         cur_ctrl_mode = ctrl_mode;
         light_pwm_smooth_adj_proc();
     }

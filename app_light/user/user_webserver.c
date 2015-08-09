@@ -19,6 +19,7 @@
 #include "user_json.h"
 #include "user_webserver.h"
 #include "esp_send.h"
+#include "driver/uart.h"
 
 #include "upgrade.h"
 #if ESP_PLATFORM
@@ -451,6 +452,189 @@ JSONTREE_OBJECT(BatteryTree,
                 JSONTREE_PAIR("switches", &bat_tree));
 
 #endif
+
+
+
+
+
+#if ESP_MESH_SUPPORT
+//#include "mesh.h"
+
+LOCAL uint8 *MeshChildInfo = NULL;
+LOCAL uint8 *MeshParentInfo = NULL;
+LOCAL uint8 MeshChildrenNum = 0; 
+LOCAL uint8 MeshParentNum = 0; 
+
+LOCAL void mesh_update_topology(enum mesh_node_type type)
+{
+	MeshChildInfo = NULL;
+	MeshParentInfo = NULL;
+	MeshChildrenNum = 0; 
+	MeshParentNum = 0; 
+	int i;
+
+	
+    
+    if(type==MESH_NODE_CHILD){
+    	int i;
+    	if (espconn_mesh_get_node_info(MESH_NODE_CHILD, &MeshChildInfo, &MeshChildrenNum)) {
+    		os_printf("get child info success\n");
+    		if (MeshChildrenNum == 0) {
+    			os_printf("no child\n");
+    			MeshChildInfo = NULL;
+    		    MeshChildrenNum = 0;
+    		} else {
+    		   // children represents the count of children.
+    		   // you can read the child-information from child_info.
+    		   for(i=0;i<MeshChildrenNum;i++){
+    			   //os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+    			   os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(MeshChildInfo+i*6));
+    		   }
+    		}
+    	} else {
+    		os_printf("get child info fail\n");
+    	} 
+    }
+    else if(type==MESH_NODE_PARENT){
+    
+        if (espconn_mesh_get_node_info(MESH_NODE_PARENT, &MeshParentInfo, &MeshParentNum)) {
+        	os_printf("get parent info success\n");
+        	if (MeshParentNum == 0) {
+        		os_printf("no parent\n");
+    			MeshParentInfo = NULL;
+    		    MeshParentNum = 0;
+        	} else {
+        	   // children represents the count of children.
+        	   // you can read the child-information from child_info.
+        	   for(i=0;i<MeshParentNum;i++){
+        		   //os_printf("ptr[%d]: %p \r\n",i,info_mesh+i*6);
+        		   os_printf("MAC[%d]:"MACSTR"\r\n",i,MAC2STR(MeshParentInfo+i*6));
+        	   }
+        	}
+        } else {
+        	os_printf("get parent info fail\n");
+        } 
+    }
+
+
+
+
+
+}
+
+
+//---------------------------------------------------------
+
+bool ICACHE_FLASH_ATTR mesh_root_if()
+{
+    struct ip_info ipconfig;
+    wifi_get_ip_info(STATION_IF, &ipconfig);
+    if(espconn_mesh_local_addr(&ipconfig.ip)) return false;
+	else return true;
+}
+
+
+
+static int ICACHE_FLASH_ATTR mesh_topology_get(struct jsontree_context *js_ctx) {
+	char buf[24];
+	os_memset(buf,0,sizeof(buf));
+
+	const char *path = jsontree_path_name(js_ctx, js_ctx->depth-1);
+	int idx=js_ctx->index[js_ctx->depth-2];
+
+	os_printf("=================================\r\n");
+	os_printf("mesh topology idx: %d \r\n",idx);
+	os_printf("path: %s \r\n",path);
+	os_printf("depth: %d \r\n",js_ctx->depth);
+	os_printf("=================================\r\n");
+	
+	if (os_strcmp(path, "mac")==0 && js_ctx->depth == 3) {
+        if(MeshParentInfo==NULL) mesh_update_topology(MESH_NODE_PARENT);
+		
+		if(MeshParentInfo){
+			if(mesh_root_if()){
+                os_sprintf(buf, MACSTR, MAC2STR(MeshParentInfo+DEV_MAC_LEN*idx) );
+				os_printf("MAC[%d]:"MACSTR"\r\n",idx,MAC2STR(MeshParentInfo+idx*6));
+				os_printf("prnt mac: %s \r\n",buf);
+				jsontree_write_string(js_ctx, buf);
+			}else{
+        		os_sprintf(buf, MACSTR, 0x18,MAC2STR5BYTES(MeshParentInfo+DEV_MAC_LEN*idx) );
+    			os_printf("MAC[%d]:"MACSTR"\r\n",idx,MAC2STR(MeshParentInfo+idx*6));
+    			os_printf("prnt mac: %s \r\n",buf);
+        		jsontree_write_string(js_ctx, buf);
+			}
+		}else{
+			jsontree_write_string(js_ctx, "None");
+		}
+		
+	} else if (os_strcmp(path, "type")==0 && js_ctx->depth == 4) {
+        if(MeshChildInfo==NULL) mesh_update_topology(MESH_NODE_CHILD);
+
+		if(MeshChildInfo!=NULL && idx<MeshChildrenNum ){
+	        jsontree_write_string(js_ctx, "Light");//LIGHT ONLY , JUST FOR NOW
+
+		}else{
+	        jsontree_write_string(js_ctx, "None");
+		}
+
+	}else if(os_strcmp(path, "type")==0 && js_ctx->depth == 2){
+		jsontree_write_string(js_ctx, "Light");//LIGHT ONLY , JUST FOR NOW
+
+	}else if (os_strcmp(path, "mac")==0 && js_ctx->depth == 4) {
+		//jsontree_write_int(js_ctx, mv);
+		if(MeshChildInfo==NULL) mesh_update_topology(MESH_NODE_CHILD);
+		
+		if(MeshChildInfo!=NULL && idx<MeshChildrenNum ){
+    		os_sprintf(buf, MACSTR, 0x18,MAC2STR5BYTES(MeshChildInfo+DEV_MAC_LEN*idx) );
+    		//os_sprintf(buf, MACSTR, 1,2,3,4,5,6 );
+    		os_printf("MAC[%d]:"MACSTR"\r\n",idx,MAC2STR(MeshChildInfo+idx*6));
+			os_printf("prnt mac: %s \r\n",buf);
+    		jsontree_write_string(js_ctx, buf);
+		}else{
+    	    jsontree_write_string(js_ctx, "None");
+		}
+	}
+	
+	return 0;
+}
+
+LOCAL struct jsontree_callback mesh_topology_callback =
+    JSONTREE_CALLBACK(mesh_topology_get, NULL);
+
+JSONTREE_OBJECT(mesh_parent_tree,
+                JSONTREE_PAIR("mac", &mesh_topology_callback));
+JSONTREE_OBJECT(mesh_child_desc,
+                JSONTREE_PAIR("type", &mesh_topology_callback),
+                JSONTREE_PAIR("mac", &mesh_topology_callback));
+JSONTREE_ARRAY(mesh_child_tree,
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc),
+                JSONTREE_PAIR_ARRAY(&mesh_child_desc));
+JSONTREE_OBJECT(mesh_info_tree,
+                JSONTREE_PAIR("parent", &mesh_parent_tree),
+                JSONTREE_PAIR("type", &mesh_topology_callback),
+                JSONTREE_PAIR("children", &mesh_child_tree),);
+JSONTREE_OBJECT(MeshInfoTree,
+                JSONTREE_PAIR("mesh_info", &mesh_info_tree));
+
+#endif
+
+
+#if ESP_DEBUG_MODE
+
+
+#endif
+
+
+
+
+
+
 
 /******************************************************************************
  * FunctionName : wifi_station_get
@@ -1202,6 +1386,12 @@ LOCAL void ICACHE_FLASH_ATTR json_build_packet(char *pbuf, ParmType ParmType)
             json_ws_send((struct jsontree_value *)&StatusTree, "switch", pbuf);
             break;
 #endif
+#if ESP_MESH_SUPPORT
+		case MESH_INFO:
+			mesh_update_topology(MESH_NODE_PARENT);
+            json_ws_send((struct jsontree_value *)&MeshInfoTree, "mesh_info", pbuf);
+            break;
+#endif
         case INFOMATION:
             json_ws_send((struct jsontree_value *)&INFOTree, "info", pbuf);
             break;
@@ -1620,7 +1810,7 @@ local_upgrade_download(void * arg,char *pusrdata, unsigned short length)
 			os_printf("Content-Length: failed\n");
 		}
 		if (sumlength != 0) {
-			system_upgrade_erase_flash(sumlength);
+			//system_upgrade_erase_flash(sumlength);
 		}
         ptr = (char *)os_strstr(pusrdata, "\r\n\r\n");
         length -= ptr - pusrdata;
@@ -1654,16 +1844,18 @@ local_upgrade_download(void * arg,char *pusrdata, unsigned short length)
  *                length -- The length of received data
  * Returns      : none
 *******************************************************************************/
-LOCAL void ICACHE_FLASH_ATTR
+void ICACHE_FLASH_ATTR
 webserver_recv(void *arg, char *pusrdata, unsigned short length)
 {
     URL_Frame *pURL_Frame = NULL;
     char *pParseBuffer = NULL;
     bool parse_flag = false;
+	#if ESP_DEBUG_MODE
+	_LINE_DESP();
+	os_printf("tcp data:80: \r\n%s\r\n",pusrdata);
+	_LINE_DESP();
+	#endif
 	#if ESP_MESH_SUPPORT
-	    _LINE_DESP();
-		os_printf("tcp data:80: \r\n%s\r\n",pusrdata);
-		_LINE_DESP();
         sip = ESP_MESH_SIP_STRING;
     	sport = ESP_MESH_SPORT_STRING;
 	#endif
@@ -1672,22 +1864,19 @@ webserver_recv(void *arg, char *pusrdata, unsigned short length)
     if(upgrade_lock == 0){
 
         os_printf("len:%u\n",length);
-        if(check_data(pusrdata, length) == false)
-        {
+        if(check_data(pusrdata, length) == false){
             os_printf("goto\n");
              goto _temp_exit;
         }
 #if ESP_MESH_SUPPORT
-		 sip = (char *)os_strstr(pusrdata, sip);
-		 sport = (char *)os_strstr(pusrdata, sport);
+        sip = (char *)os_strstr(pusrdata, sip);
+        sport = (char *)os_strstr(pusrdata, sport);
 #endif
-    	 parse_flag = save_data(pusrdata, length);
+    	parse_flag = save_data(pusrdata, length);
         if (parse_flag == false) {
-			//WEB_INFO("-----------\r\nRESPONSE FALSE\r\n-------------\r\n");
+    		//WEB_INFO("-----------\r\nRESPONSE FALSE\r\n-------------\r\n");
         	response_send(ptrespconn, false);
         }
-
-//        os_printf(precvbuffer);
         pURL_Frame = (URL_Frame *)os_zalloc(sizeof(URL_Frame));
         parse_url(precvbuffer, pURL_Frame);
 
@@ -1767,6 +1956,14 @@ webserver_recv(void *arg, char *pusrdata, unsigned short length)
 						json_send(ptrespconn, BATTERY_STATUS);
 						//BatteryTree
 					}
+
+#endif
+#if ESP_MESH_SUPPORT
+                    else if (os_strcmp(pURL_Frame->pFilename, "mesh_info") == 0) {
+                    	json_send(ptrespconn, MESH_INFO);
+                    	//BatteryTree
+                    }
+
 
 #endif
 
@@ -1965,11 +2162,133 @@ webserver_recv(void *arg, char *pusrdata, unsigned short length)
 
 						response_send(ptrespconn, true);
 						os_printf("local upgrade restart\n");
+						UART_WaitTxFifoEmpty(UART0,50000);
 						system_upgrade_reboot();
 					} else {
 						response_send(ptrespconn, false);
 					}
-				}else {
+				}
+#if ESP_DEBUG_MODE
+                else if(os_strcmp(pURL_Frame->pSelect, "debug") == 0){
+					os_printf("in debug\r\n");
+					if(os_strcmp(pURL_Frame->pCommand, "command") == 0){
+						os_printf("in command\r\n");
+						os_printf("pURL_Frame->pFilename: %s \r\n",pURL_Frame->pFilename);
+    					if (os_strcmp(pURL_Frame->pFilename, "setdevkey") == 0) {
+    						response_send(ptrespconn, true);
+    						char* ptr = (char *)os_strstr(pusrdata, "\r\n\r\n");
+    						ptr +=4;						
+    						os_printf("devkey: %s\r\n",ptr);
+    						extern struct esp_platform_saved_param esp_param;
+    						os_memcpy(esp_param.devkey,ptr,40);
+    						system_param_save_with_protect(ESP_PARAM_START_SEC, &esp_param, sizeof(esp_param));
+    						os_printf("set devkey ....\n");
+    					}
+						else if (os_strcmp(pURL_Frame->pFilename, "mac_info") == 0) {
+							uint32 MAC_FLG = READ_PERI_REG(0x3ff00054);
+							uint8 data_buf[32];
+							os_memset(data_buf,0,sizeof(data_buf));
+							MAC_FLG = ((MAC_FLG>>16)&0xff);
+							if(MAC_FLG == 0){
+								os_sprintf(data_buf,"18FE34%06X",system_get_chip_id());
+							}else if(MAC_FLG == 1){
+								os_sprintf(data_buf,"ACD074%06X",system_get_chip_id());
+							}else{
+								os_printf("dev mac error? 0x%02x\r\n",MAC_FLG);
+								os_sprintf(data_buf,"000000000000");
+							}
+
+    						data_send(ptrespconn, true, data_buf);
+    						os_printf("mac: %s\n",data_buf);
+    						UART_WaitTxFifoEmpty(UART0,50000);
+    						//system_upgrade_reboot();
+					    }
+						else if (os_strcmp(pURL_Frame->pFilename, "key_info") == 0) {
+							uint32 MAC_FLG = READ_PERI_REG(0x3ff00054);
+							uint8 data_buf[41];
+							os_memset(data_buf,0,sizeof(data_buf));
+
+							extern struct esp_platform_saved_param esp_param;
+							os_memcpy(data_buf,esp_param.devkey,40);
+    						data_send(ptrespconn, true, data_buf);
+    						os_printf("mac: %s\n",data_buf);
+    						UART_WaitTxFifoEmpty(UART0,50000);
+    						//system_upgrade_reboot();
+					    }
+						else if (os_strcmp(pURL_Frame->pFilename, "reboot_to_ap") == 0) {
+							
+    						user_esp_platform_set_reset_flg(MODE_APMODE);
+    						response_send(ptrespconn, true);
+    						os_printf("local upgrade restart\n");
+    						UART_WaitTxFifoEmpty(UART0,50000);
+    						system_upgrade_reboot();
+							os_printf("call upgrade reboot ...\r\n");
+							UART_WaitTxFifoEmpty(UART0,50000);
+					    }
+						else if(os_strcmp(pURL_Frame->pFilename, "set_switch_mac") == 0){
+							#if ESP_NOW_SUPPORT
+    						char* ptr = (char *)os_strstr(pusrdata, "\r\n\r\n");
+    						ptr +=4;			
+							int len_tmp = (length - (ptr-pusrdata));
+							uint8* data_tmp = (uint8*)os_zalloc(len_tmp);
+							os_memcpy(data_tmp,ptr,len_tmp);
+							spi_flash_erase_sector(LIGHT_MASTER_MAC_LIST_ADDR);
+							spi_flash_erase_sector(LIGHT_MASTER_MAC_LIST_ADDR+1);
+							spi_flash_erase_sector(LIGHT_MASTER_MAC_LIST_ADDR+2);
+							spi_flash_write((LIGHT_MASTER_MAC_LIST_ADDR+1)*0x1000,(uint32*) data_tmp,len_tmp);
+							light_EspnowMasterMacInit();
+							os_free(data_tmp);
+							data_tmp = NULL;
+							#endif
+							response_send(ptrespconn, true);
+						}
+					}else if(os_strcmp(pURL_Frame->pCommand, "setboot") == 0){
+    					if (os_strcmp(pURL_Frame->pFilename, "40m") == 0) {
+    						uint8* data_bkp = (uint8*)os_zalloc(0x1000);
+    						if( data_bkp ==NULL){
+    							response_send(ptrespconn, false);
+    							return;
+    						}
+							char* ptmp = pURL_Frame->pFilename;
+    						spi_flash_read(0x0,(uint32*)data_bkp,0x1000);
+    						os_printf("data bkp: %02x %02x %02x %02x %02x %02x\r\n",data_bkp[0],data_bkp[1],data_bkp[2],data_bkp[3],data_bkp[4],data_bkp[5]); 
+    						*(data_bkp+2) = 0x0;
+    						*(data_bkp+3) = 0x20;
+    						spi_flash_erase_sector(0);
+    						spi_flash_write(0x0,(uint32 *)data_bkp,0x1000);
+    						spi_flash_read(0x0,(uint32*)data_bkp,0x1000);
+    						os_printf("data bkp check: %02x %02x %02x %02x %02x %02x\r\n",data_bkp[0],data_bkp[1],data_bkp[2],data_bkp[3],data_bkp[4],data_bkp[5]); 
+    						response_send(ptrespconn, true);
+    						os_printf("set devkey ....\n");
+    						UART_WaitTxFifoEmpty(UART0,50000);
+    						os_free(data_bkp);
+    						data_bkp=NULL;
+    					}
+						else if (os_strcmp(pURL_Frame->pFilename, "80m") == 0) {
+    						uint8* data_bkp = (uint8*)os_zalloc(0x1000);
+    						if( data_bkp ==NULL){
+    							response_send(ptrespconn, false);
+    							return;
+    						}
+							char* ptmp = pURL_Frame->pFilename;
+    						spi_flash_read(0x0,(uint32*)data_bkp,0x1000);
+    						os_printf("data bkp: %02x %02x %02x %02x %02x %02x\r\n",data_bkp[0],data_bkp[1],data_bkp[2],data_bkp[3],data_bkp[4],data_bkp[5]); 
+    						*(data_bkp+2) = 0x0;
+    						*(data_bkp+3) = 0x2f;
+    						spi_flash_erase_sector(0);
+    						spi_flash_write(0x0,(uint32 *)data_bkp,0x1000);
+    						spi_flash_read(0x0,(uint32*)data_bkp,0x1000);
+    						os_printf("data bkp check: %02x %02x %02x %02x %02x %02x\r\n",data_bkp[0],data_bkp[1],data_bkp[2],data_bkp[3],data_bkp[4],data_bkp[5]); 
+    						response_send(ptrespconn, true);
+    						os_printf("set devkey ....\n");
+    						UART_WaitTxFifoEmpty(UART0,50000);
+    						os_free(data_bkp);
+    						data_bkp=NULL;
+    					}
+					}
+                }
+#endif
+				else {
 					response_send(ptrespconn, false);
                 }
                  break;

@@ -252,6 +252,7 @@ struct softap_config {
     uint16 beacon_interval;	// Note: support 100 ~ 60000 ms, default 100
 };
 
+
 bool wifi_softap_get_config(struct softap_config *config);
 bool wifi_softap_get_config_default(struct softap_config *config);
 bool wifi_softap_set_config(struct softap_config *config);
