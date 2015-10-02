@@ -1,7 +1,7 @@
 # esp_light_with_mesh
 
 
-This is a beta version of light demo withe mesh network.
+This is a beta version of light demo with mesh network.
 We will add more comments and update soon.
 
 APP_LIGHT:
